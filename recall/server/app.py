@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import FastAPI, responses, HTTPException, Header, Depends, Security, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.concurrency import run_in_threadpool
@@ -11,7 +11,14 @@ from recall.engine.extractor import OpenAIProviderAdapter
 from recall.engine.similarity import OpenAIEmbeddingProvider
 from recall.models.fact import FactRecord
 
-app = FastAPI(title="Recall Server", description="FastAPI Multi-Tenant Server for Recall Memory Engine")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    tenant_manager.close_all()
+
+app = FastAPI(title="Recall Server", description="FastAPI Multi-Tenant Server for Recall Memory Engine", lifespan=lifespan)
 
 # Security
 security = HTTPBearer()
@@ -117,9 +124,6 @@ class VacuumRequest(BaseModel):
 class PromptContextResponse(BaseModel):
     xml_context: str
 
-@app.on_event("shutdown")
-def shutdown_event():
-    tenant_manager.close_all()
 
 @app.websocket("/api/v1/stream/{tenant_id}")
 async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str):
@@ -157,7 +161,7 @@ async def ingest_turn(
         if result.inserted_facts or result.reinforced_facts:
             await ws_manager.broadcast_to_tenant(x_tenant_id, {
                 "event": "memory_updated",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "inserted": len(result.inserted_facts),
                 "reinforced": len(result.reinforced_facts)
             })
