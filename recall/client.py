@@ -332,6 +332,13 @@ class Recall:
     def vacuum_history(self, retention_days: int = 30) -> int:
         """Triggers a hard delete of retracted historical facts older than the retention window."""
         return self.store.vacuum_history(retention_days)
+        
+    def forget(self, about_entity: str) -> int:
+        """GDPR Right to be Forgotten: Permanently deletes all trace of an entity."""
+        ent = self.get_entity(about_entity)
+        if not ent:
+            return 0
+        return self.store.forget_entity(ent.id)
 
     def inspect_history(self, logical_id: str) -> List[FactRecord]:
         """Inspects complete version history for a logical assertion."""

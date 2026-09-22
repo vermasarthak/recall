@@ -2,7 +2,7 @@ import os
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Header, Depends, Security, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, responses, HTTPException, Header, Depends, Security, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.concurrency import run_in_threadpool
 
@@ -198,5 +198,30 @@ async def get_history(logical_id: str, client: Recall = Depends(get_recall_clien
     try:
         history = await run_in_threadpool(client.inspect_history, logical_id)
         return [h.model_dump() for h in history]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ForgetEntityRequest(BaseModel):
+    about_entity: str
+
+@app.post("/api/v1/admin/forget", dependencies=[Depends(verify_api_key)])
+async def forget_entity(req: ForgetEntityRequest, client: Recall = Depends(get_recall_client)):
+    try:
+        deleted = await run_in_threadpool(client.forget, req.about_entity)
+        return {"deleted_records": deleted, "status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/admin/export", dependencies=[Depends(verify_api_key)])
+async def export_database(client: Recall = Depends(get_recall_client)):
+    try:
+        db_path = client.store.db_path
+        if not os.path.exists(db_path):
+            raise HTTPException(status_code=404, detail="Database file not found")
+        return responses.FileResponse(
+            path=db_path,
+            filename=os.path.basename(db_path),
+            media_type="application/octet-stream"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

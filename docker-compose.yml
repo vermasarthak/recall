@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  recall-engine:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - RECALL_API_KEY=sk-recall-dev-key
+    restart: unless-stopped

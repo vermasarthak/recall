@@ -340,3 +340,21 @@ class StorageEngine:
             conn.close()
             
         return deleted_count
+
+    def forget_entity(self, entity_id: str) -> int:
+        """GDPR Right to be Forgotten. Hard deletes an entity and all its history."""
+        deleted_count = 0
+        with self.get_connection() as conn:
+            # Delete facts where entity is subject or object
+            cursor = conn.execute("DELETE FROM facts WHERE subject_id = ? OR object_entity_id = ?", (entity_id, entity_id))
+            deleted_count += cursor.rowcount
+            
+            # Delete relations
+            cursor = conn.execute("DELETE FROM relations WHERE source_id = ? OR target_id = ?", (entity_id, entity_id))
+            deleted_count += cursor.rowcount
+            
+            # Delete entity itself
+            cursor = conn.execute("DELETE FROM entities WHERE id = ?", (entity_id,))
+            deleted_count += cursor.rowcount
+            
+        return deleted_count
