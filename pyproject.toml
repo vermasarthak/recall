@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recall"
+version = "0.1.0"
+description = "Temporal Entity Memory Engine for Social AI and Long-Horizon Agents"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Sarthak Verma", email = "sarthakverma0802@gmail.com" }
+]
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "setuptools>=61.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+recall = ["db/schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
