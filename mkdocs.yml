@@ -1,0 +1,10 @@
+site_name: Recall
+site_description: Temporal Entity Memory Engine for Social AI
+theme:
+  name: material
+  palette:
+    primary: deep purple
+    accent: deep orange
+nav:
+  - Home: index.md
+  - Architecture: architecture.md

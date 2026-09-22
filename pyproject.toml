@@ -24,13 +24,18 @@ dev = [
     "mypy>=1.9.0"
 ]
 client = [
-    "requests>=2.31.0"
+    "requests>=2.31.0",
+    "httpx>=0.25.0",
+    "websockets>=11.0.3"
 ]
 server = [
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "websockets>=11.0.3"
 ]
+
+[project.scripts]
+recall = "recall.cli:main"
 
 [tool.ruff]
 line-length = 120
