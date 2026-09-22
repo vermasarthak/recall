@@ -29,28 +29,30 @@ class StorageEngine:
     """Thread-safe SQLite storage engine with bitemporal transaction support."""
 
     def __init__(self, db_path: str = "recall.db", clock: Optional[Clock] = None):
+        import threading
         self.db_path = db_path
         self.clock = clock or SystemClock()
-        self._conn: Optional[sqlite3.Connection] = None
-        self._connect()
+        self._local = threading.local()
+        self._write_lock = threading.RLock()
+        
         self.init_db()
 
-    def _connect(self) -> None:
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA foreign_keys = ON;")
-            self._conn.execute("PRAGMA busy_timeout = 5000;")
+    def _get_local_conn(self) -> sqlite3.Connection:
+        if not hasattr(self._local, "conn") or self._local.conn is None:
+            conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=15.0)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("PRAGMA busy_timeout = 5000;")
             if self.db_path != ":memory:":
                 try:
-                    self._conn.execute("PRAGMA journal_mode = WAL;")
+                    conn.execute("PRAGMA journal_mode = WAL;")
                 except sqlite3.OperationalError:
                     pass
+            self._local.conn = conn
+        return self._local.conn
 
     def get_connection(self) -> sqlite3.Connection:
-        if self._conn is None:
-            self._connect()
-        return self._conn
+        return self._get_local_conn()
 
     def init_db(self) -> None:
         """Initializes database schema from schema.sql."""
@@ -69,9 +71,9 @@ class StorageEngine:
             conn.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (1, ?);", (to_iso_utc(self.clock.now()),))
 
     def close(self) -> None:
-        if self._conn:
-            self._conn.close()
-            self._conn = None
+        if hasattr(self._local, "conn") and self._local.conn:
+            self._local.conn.close()
+            self._local.conn = None
 
     def __enter__(self) -> "StorageEngine":
         return self
@@ -89,7 +91,7 @@ class StorageEngine:
         metadata_json = json.dumps(entity.metadata)
         created_at_str = to_iso_utc(clock_now)
 
-        with conn:
+        with self._write_lock, conn:
             conn.execute(
                 """INSERT INTO entities (id, type, canonical_name, aliases, metadata, created_at)
                    VALUES (?, ?, ?, ?, ?, ?);""",
@@ -172,7 +174,7 @@ class StorageEngine:
         if conn:
             connection.execute(sql, params)
         else:
-            with connection:
+            with self._write_lock, connection:
                 connection.execute(sql, params)
 
         return record
@@ -182,19 +184,22 @@ class StorageEngine:
         connection = conn or self.get_connection()
         tx_to_str = to_iso_utc(ensure_utc(tx_to))
         
-        # Verify not already closed
-        row = connection.execute("SELECT tx_to FROM facts WHERE version_id = ?;", (version_id,)).fetchone()
-        if not row:
-            raise ValueError(f"Fact version_id '{version_id}' not found.")
-        if row["tx_to"] is not None:
-            raise ValueError(f"Repeated closure forbidden: version_id '{version_id}' already has tx_to={row['tx_to']}.")
+        sql = "UPDATE facts SET tx_to = ? WHERE version_id = ? AND tx_to IS NULL;"
+        
+        def execute_update(c):
+            cursor = c.execute(sql, (tx_to_str, version_id))
+            if cursor.rowcount == 0:
+                row = c.execute("SELECT tx_to FROM facts WHERE version_id = ?;", (version_id,)).fetchone()
+                if not row:
+                    raise ValueError(f"Fact version_id '{version_id}' not found.")
+                raise ValueError(f"Repeated closure forbidden: version_id '{version_id}' already has tx_to={row['tx_to']}.")
 
-        sql = "UPDATE facts SET tx_to = ? WHERE version_id = ?;"
         if conn:
-            connection.execute(sql, (tx_to_str, version_id))
+            execute_update(connection)
         else:
-            with connection:
-                connection.execute(sql, (tx_to_str, version_id))
+            with self._write_lock:
+                with connection:
+                    execute_update(connection)
 
     def close_fact_valid_to(self, version_id: str, valid_to: datetime, conn: Optional[sqlite3.Connection] = None) -> None:
         """Helper to close valid_to when building new versions (by writing a new version with tx_from=now)."""
@@ -220,7 +225,7 @@ class StorageEngine:
         if conn:
             connection.execute(sql, params)
         else:
-            with connection:
+            with self._write_lock, connection:
                 connection.execute(sql, params)
 
         return reinf_id
