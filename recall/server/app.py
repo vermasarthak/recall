@@ -7,6 +7,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.concurrency import run_in_threadpool
 
 from recall.client import Recall
+from recall.engine.extractor import OpenAIProviderAdapter
+from recall.engine.similarity import OpenAIEmbeddingProvider
 from recall.models.fact import FactRecord
 
 app = FastAPI(title="Recall Server", description="FastAPI Multi-Tenant Server for Recall Memory Engine")
@@ -38,7 +40,24 @@ class TenantManager:
             
         if tenant_id not in self.clients:
             db_path = os.path.join(self.data_dir, f"{tenant_id}.db")
-            self.clients[tenant_id] = Recall(db_path=db_path)
+            
+            extractor = None
+            similarity = None
+            openai_key = os.environ.get("OPENAI_API_KEY")
+            
+            if openai_key:
+                extractor = OpenAIProviderAdapter(api_key=openai_key)
+                # Note: To enable persistent vector caching, pass the store here once initialized
+                similarity = OpenAIEmbeddingProvider(api_key=openai_key)
+                
+            client = Recall(db_path=db_path, extractor=extractor, similarity_provider=similarity)
+            
+            # Post-initialization inject cache for similarity provider
+            if openai_key and isinstance(similarity, OpenAIEmbeddingProvider):
+                similarity.cache = client.store
+                
+            self.clients[tenant_id] = client
+            
         return self.clients[tenant_id]
 
     def close_all(self):
