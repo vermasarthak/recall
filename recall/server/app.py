@@ -1,14 +1,28 @@
 import os
 from typing import List, Optional, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi import FastAPI, HTTPException, Header, Depends, Security, WebSocket, WebSocketDisconnect
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.concurrency import run_in_threadpool
 
 from recall.client import Recall
 from recall.models.fact import FactRecord
 
 app = FastAPI(title="Recall Server", description="FastAPI Multi-Tenant Server for Recall Memory Engine")
+
+# Security
+security = HTTPBearer()
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
+    expected_key = os.environ.get("RECALL_API_KEY", "sk-recall-dev-key")
+    if credentials.credentials != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return credentials.credentials
 
 # Multi-tenant state manager
 class TenantManager:
@@ -24,7 +38,6 @@ class TenantManager:
             
         if tenant_id not in self.clients:
             db_path = os.path.join(self.data_dir, f"{tenant_id}.db")
-            # In a real system, you might inject OpenAIEmbeddingProvider here
             self.clients[tenant_id] = Recall(db_path=db_path)
         return self.clients[tenant_id]
 
@@ -33,6 +46,33 @@ class TenantManager:
             client.close()
 
 tenant_manager = TenantManager()
+
+# WebSocket Manager for Real-Time Hooks
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+    
+    async def connect(self, websocket: WebSocket, tenant_id: str):
+        await websocket.accept()
+        if tenant_id not in self.active_connections:
+            self.active_connections[tenant_id] = []
+        self.active_connections[tenant_id].append(websocket)
+        
+    def disconnect(self, websocket: WebSocket, tenant_id: str):
+        if tenant_id in self.active_connections:
+            self.active_connections[tenant_id].remove(websocket)
+            if not self.active_connections[tenant_id]:
+                del self.active_connections[tenant_id]
+                
+    async def broadcast_to_tenant(self, tenant_id: str, message: dict):
+        if tenant_id in self.active_connections:
+            for connection in self.active_connections[tenant_id]:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass
+
+ws_manager = ConnectionManager()
 
 # Dependency to extract tenant client
 async def get_recall_client(x_tenant_id: str = Header(..., description="Tenant ID (e.g., user_123)")) -> Recall:
@@ -62,10 +102,29 @@ class PromptContextResponse(BaseModel):
 def shutdown_event():
     tenant_manager.close_all()
 
-@app.post("/api/v1/ingest")
-async def ingest_turn(req: IngestRequest, client: Recall = Depends(get_recall_client)):
+@app.websocket("/api/v1/stream/{tenant_id}")
+async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str):
+    # Authenticate websocket
+    expected_key = os.environ.get("RECALL_API_KEY", "sk-recall-dev-key")
+    if token != expected_key:
+        await websocket.close(code=1008)
+        return
+        
+    await ws_manager.connect(websocket, tenant_id)
     try:
-        # Prevent event-loop blocking by running synchronous DB calls in a threadpool
+        while True:
+            data = await websocket.receive_text()
+            # We only expect them to listen, but keep connection alive
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, tenant_id)
+
+@app.post("/api/v1/ingest", dependencies=[Depends(verify_api_key)])
+async def ingest_turn(
+    req: IngestRequest, 
+    x_tenant_id: str = Header(...), 
+    client: Recall = Depends(get_recall_client)
+):
+    try:
         result = await run_in_threadpool(
             client.ingest_turn,
             speaker=req.speaker,
@@ -74,6 +133,16 @@ async def ingest_turn(req: IngestRequest, client: Recall = Depends(get_recall_cl
             message_id=req.message_id,
             timestamp=req.timestamp
         )
+        
+        # Real-Time Broadcast if memory changed
+        if result.inserted_facts or result.reinforced_facts:
+            await ws_manager.broadcast_to_tenant(x_tenant_id, {
+                "event": "memory_updated",
+                "timestamp": datetime.utcnow().isoformat(),
+                "inserted": len(result.inserted_facts),
+                "reinforced": len(result.reinforced_facts)
+            })
+            
         return {
             "inserted": len(result.inserted_facts),
             "reinforced": len(result.reinforced_facts),
@@ -82,7 +151,7 @@ async def ingest_turn(req: IngestRequest, client: Recall = Depends(get_recall_cl
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/query")
+@app.post("/api/v1/query", dependencies=[Depends(verify_api_key)])
 async def query_memory(req: QueryRequest, client: Recall = Depends(get_recall_client)):
     try:
         results = await run_in_threadpool(
@@ -101,7 +170,7 @@ async def query_memory(req: QueryRequest, client: Recall = Depends(get_recall_cl
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/query/prompt-context", response_model=PromptContextResponse)
+@app.post("/api/v1/query/prompt-context", response_model=PromptContextResponse, dependencies=[Depends(verify_api_key)])
 async def get_prompt_context(req: QueryRequest, client: Recall = Depends(get_recall_client)):
     try:
         xml = await run_in_threadpool(
@@ -116,7 +185,7 @@ async def get_prompt_context(req: QueryRequest, client: Recall = Depends(get_rec
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/admin/vacuum")
+@app.post("/api/v1/admin/vacuum", dependencies=[Depends(verify_api_key)])
 async def vacuum_database(req: VacuumRequest, client: Recall = Depends(get_recall_client)):
     try:
         deleted = await run_in_threadpool(client.vacuum_history, req.retention_days)
@@ -124,7 +193,7 @@ async def vacuum_database(req: VacuumRequest, client: Recall = Depends(get_recal
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/history/{logical_id}")
+@app.get("/api/v1/history/{logical_id}", dependencies=[Depends(verify_api_key)])
 async def get_history(logical_id: str, client: Recall = Depends(get_recall_client)):
     try:
         history = await run_in_threadpool(client.inspect_history, logical_id)
