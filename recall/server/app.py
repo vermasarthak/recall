@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from fastapi import FastAPI, responses, HTTPException, Header, Depends, Security, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -98,21 +98,21 @@ async def get_recall_client(x_tenant_id: str = Header(..., description="Tenant I
     return tenant_manager.get_client(x_tenant_id)
 
 class IngestRequest(BaseModel):
-    speaker: str
-    text: str
-    conversation_id: str
-    message_id: Optional[str] = None
+    speaker: str = Field(..., max_length=100)
+    text: str = Field(..., max_length=10000)
+    conversation_id: str = Field(..., max_length=100)
+    message_id: Optional[str] = Field(None, max_length=100)
     timestamp: Optional[datetime] = None
 
 class QueryRequest(BaseModel):
-    about_entity: str
-    context: str = ""
-    min_salience: float = 0.2
-    limit: int = 10
-    max_tokens: Optional[int] = None
+    about_entity: str = Field(..., max_length=200)
+    context: str = Field("", max_length=2000)
+    min_salience: float = Field(0.2, ge=0.0, le=1.0)
+    limit: int = Field(10, ge=1, le=100)
+    max_tokens: Optional[int] = Field(None, ge=10, le=32000)
 
 class VacuumRequest(BaseModel):
-    retention_days: int = 30
+    retention_days: int = Field(30, ge=0, le=3650)
 
 class PromptContextResponse(BaseModel):
     xml_context: str
