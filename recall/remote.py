@@ -40,6 +40,12 @@ class RecallRemoteClient:
         res = self.session.post(f"{self.base_url}/api/v1/query", json=payload)
         return self._handle_response(res)
 
+    def search(self, query: str, limit: int = 10, min_salience: float = 0.5) -> List[Dict[str, Any]]:
+        """Global semantic search across all memories using cosine similarity."""
+        payload = {"query": query, "limit": limit, "min_salience": min_salience}
+        res = self.session.post(f"{self.base_url}/api/v1/search", json=payload)
+        return self._handle_response(res)
+
     def format_for_prompt(self, about_entity: str, context: str = "", limit: int = 10, max_tokens: Optional[int] = None) -> str:
         """Get pre-formatted XML context ready for LLM injection."""
         payload = {
@@ -102,6 +108,12 @@ class AsyncRecallRemoteClient:
     async def query(self, about_entity: str, context: str = "", limit: int = 10) -> List[Dict[str, Any]]:
         payload = {"about_entity": about_entity, "context": context, "limit": limit}
         res = await self.client.post("/api/v1/query", json=payload)
+        return self._handle_response(res)
+
+    async def search(self, query: str, limit: int = 10, min_salience: float = 0.5) -> List[Dict[str, Any]]:
+        """Global semantic search across all memories using cosine similarity."""
+        payload = {"query": query, "limit": limit, "min_salience": min_salience}
+        res = await self.client.post("/api/v1/search", json=payload)
         return self._handle_response(res)
 
     async def format_for_prompt(self, about_entity: str, context: str = "", limit: int = 10, max_tokens: Optional[int] = None) -> str:

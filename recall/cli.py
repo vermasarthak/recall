@@ -21,6 +21,9 @@ def main():
 
     # Command: query
     parser_query = subparsers.add_parser("query", help="Query memory (requires server)")
+    parser_search = subparsers.add_parser("search", help="Global semantic search")
+    parser_search.add_argument("query", help="Search string")
+    parser_search.add_argument("--tenant", default="default", help="Tenant ID")
     parser_query.add_argument("entity", help="Entity to query about")
     parser_query.add_argument("--tenant", default="default", help="Tenant ID")
 
@@ -35,7 +38,7 @@ def main():
             print("Error: uvicorn is not installed. Run `pip install -e .[server]`")
             sys.exit(1)
 
-    elif args.command in ["ingest", "query"]:
+    elif args.command in ["ingest", "query", "search"]:
         try:
             from recall.remote import RecallRemoteClient
         except ImportError:
@@ -61,6 +64,18 @@ def main():
                 print("----------------------\n")
             except Exception as e:
                 print(f"Failed to query: {e}")
+                
+        elif args.command == "search":
+            try:
+                results = client.search(query=args.query)
+                print(f"\n--- Global Search Results for '{args.query}' ---")
+                for r in results:
+                    fact = r['fact']
+                    sub = r['subject']['canonical_name']
+                    print(f"-> {sub} {fact['predicate']} {fact['object_value']} (Salience: {r['salience']['composite_score']:.2f})")
+                print("----------------------\n")
+            except Exception as e:
+                print(f"Failed to search: {e}")
     else:
         parser.print_help()
 

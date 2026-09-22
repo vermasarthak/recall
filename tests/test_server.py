@@ -90,3 +90,20 @@ def test_multi_tenant_isolation(client):
     # Query B -> shouldn't see apples
     res_b = client.post("/api/v1/query", headers=headers_b, json={"about_entity": "Alice"})
     assert len(res_b.json()) == 0
+
+def test_search_endpoint(client):
+    headers = {"Authorization": "Bearer sk-test", "x-tenant-id": "user123"}
+    # Ingest dummy data
+    client.post("/api/v1/ingest", headers=headers, json={"speaker": "John", "text": "John likes StarWars", "conversation_id": "c1"})
+    
+    # Global Search
+    search_payload = {
+        "query": "watching movies",
+        "min_salience": 0.0,
+        "limit": 5
+    }
+    response = client.post("/api/v1/search", headers=headers, json=search_payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) > 0
+    assert "Starwars" in data[0]["fact"]["object_value"]

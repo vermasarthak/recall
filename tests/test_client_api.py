@@ -73,3 +73,26 @@ def test_end_to_end_client_workflow(tmp_path):
         q_persist = client_reopened.query("John", context="employment", valid_at=july_1)
         assert len(q_persist) == 1
         assert q_persist[0].fact.object_value == "AWS"
+
+def test_global_semantic_search():
+    from recall.client import Recall
+    from recall.engine.similarity import SimilarityProvider
+    
+    # Simple mock similarity that returns 0.9 if words overlap
+    class MockSim(SimilarityProvider):
+        def calculate_similarity(self, text_a: str, text_b: str) -> float:
+            words_a = set(text_a.lower().split())
+            words_b = set(text_b.lower().split())
+            if words_a & words_b:
+                return 0.9
+            return 0.1
+            
+    client = Recall(db_path=":memory:", similarity_provider=MockSim())
+    client.ingest_turn("John", "John likes StarWars", "c1")
+    client.ingest_turn("Alice", "Alice likes cookies", "c1")
+    
+    # Now semantic search without knowing the entity!
+    results = client.search(query="watching StarWars movies", min_score=0.7)
+    assert len(results) == 1
+    assert "Starwars" in results[0].fact.object_value
+    assert results[0].subject_entity.canonical_name == "John"

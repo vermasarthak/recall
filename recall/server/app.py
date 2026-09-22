@@ -248,3 +248,27 @@ async def export_database(client: Recall = Depends(get_recall_client)):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class SearchRequest(BaseModel):
+    query: str = Field(..., max_length=500)
+    min_salience: float = Field(0.5, ge=0.0, le=1.0)
+    limit: int = Field(10, ge=1, le=100)
+
+@app.post("/api/v1/search", dependencies=[Depends(verify_api_key)])
+async def search_memory(req: SearchRequest, client: Recall = Depends(get_recall_client)):
+    try:
+        results = await run_in_threadpool(
+            client.search,
+            query=req.query,
+            min_score=req.min_salience,
+            limit=req.limit
+        )
+        return [
+            {
+                "fact": r.fact.model_dump(),
+                "salience": r.salience.model_dump(),
+                "subject": r.subject_entity.model_dump()
+            } for r in results
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
