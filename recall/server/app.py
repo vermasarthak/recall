@@ -50,6 +50,10 @@ class QueryRequest(BaseModel):
     context: str = ""
     min_salience: float = 0.2
     limit: int = 10
+    max_tokens: Optional[int] = None
+
+class VacuumRequest(BaseModel):
+    retention_days: int = 30
 
 class PromptContextResponse(BaseModel):
     xml_context: str
@@ -105,9 +109,18 @@ async def get_prompt_context(req: QueryRequest, client: Recall = Depends(get_rec
             about_entity=req.about_entity,
             context=req.context,
             min_salience=req.min_salience,
-            limit=req.limit
+            limit=req.limit,
+            max_tokens=req.max_tokens
         )
         return PromptContextResponse(xml_context=xml)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/admin/vacuum")
+async def vacuum_database(req: VacuumRequest, client: Recall = Depends(get_recall_client)):
+    try:
+        deleted = await run_in_threadpool(client.vacuum_history, req.retention_days)
+        return {"deleted_records": deleted, "status": "success"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

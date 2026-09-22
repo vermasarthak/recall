@@ -311,3 +311,32 @@ class StorageEngine:
                 "INSERT OR REPLACE INTO string_embeddings (text_hash, embedding_json) VALUES (?, ?)",
                 (text_hash, json.dumps(embedding))
             )
+
+    def vacuum_history(self, retention_days: int) -> int:
+        """Deletes historical records older than retention_days and reclaims disk space."""
+        from datetime import timedelta
+        threshold_time = self.clock.now() - timedelta(days=retention_days)
+        threshold_str = threshold_time.isoformat()
+        
+        deleted_count = 0
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM facts WHERE tx_to IS NOT NULL AND tx_to < ?",
+                (threshold_str,)
+            )
+            deleted_count += cursor.rowcount
+            
+            cursor = conn.execute(
+                "DELETE FROM relations WHERE tx_to IS NOT NULL AND tx_to < ?",
+                (threshold_str,)
+            )
+            deleted_count += cursor.rowcount
+
+        # Reclaim disk space (must run outside transaction)
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        try:
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+            
+        return deleted_count

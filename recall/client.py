@@ -291,7 +291,8 @@ class Recall:
         context: str = "",
         min_salience: float = 0.2,
         valid_at: Optional[datetime] = None,
-        limit: int = 10
+        limit: int = 10,
+        max_tokens: Optional[int] = None
     ) -> str:
         """Formats the retrieved facts into a compressed XML structure optimized for LLM contexts."""
         results = self.query(about_entity, context, min_salience, valid_at, limit=limit)
@@ -299,13 +300,18 @@ class Recall:
         if not results:
             return f"<memory entity='{about_entity}'></memory>"
             
-        xml_parts = [f"<memory entity='{results[0].subject_entity.canonical_name}' canonical_id='{results[0].subject_entity.id}'>"]
+        # Heuristic: 1 token ≈ 4 characters
+        max_chars = (max_tokens * 4) if max_tokens else None
+        
+        header = f"<memory entity='{results[0].subject_entity.canonical_name}' canonical_id='{results[0].subject_entity.id}'>"
+        xml_parts = [header]
+        current_chars = len(header) + len("\n</memory>")
+        
         for res in results:
-            # Drop timezone information for compact LLM representation
             v_from = res.fact.valid_from.strftime("%Y-%m-%d")
             v_to = res.fact.valid_to.strftime("%Y-%m-%d") if res.fact.valid_to else "Present"
             
-            xml_parts.append(
+            fact_str = (
                 f"  <fact predicate='{res.fact.predicate}' "
                 f"valid_from='{v_from}' valid_to='{v_to}' "
                 f"confidence='{res.salience.confidence}' "
@@ -313,8 +319,19 @@ class Recall:
                 f"{res.fact.object_value}"
                 f"</fact>"
             )
+            
+            if max_chars and (current_chars + len(fact_str) + 1) > max_chars:
+                break
+                
+            xml_parts.append(fact_str)
+            current_chars += len(fact_str) + 1
+            
         xml_parts.append("</memory>")
         return "\n".join(xml_parts)
+
+    def vacuum_history(self, retention_days: int = 30) -> int:
+        """Triggers a hard delete of retracted historical facts older than the retention window."""
+        return self.store.vacuum_history(retention_days)
 
     def inspect_history(self, logical_id: str) -> List[FactRecord]:
         """Inspects complete version history for a logical assertion."""
