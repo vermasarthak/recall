@@ -1,10 +1,15 @@
 import math
-from typing import Protocol, List
+import hashlib
+from typing import Protocol, List, Optional
 
 class SimilarityProvider(Protocol):
     def calculate_similarity(self, text1: str, text2: str) -> float:
         """Returns a similarity score between 0.0 and 1.0"""
         ...
+
+class EmbeddingCache(Protocol):
+    def get_string_embedding(self, text_hash: str) -> Optional[List[float]]: ...
+    def save_string_embedding(self, text_hash: str, embedding: List[float]) -> None: ...
 
 class LexicalSimilarityProvider:
     def calculate_similarity(self, text1: str, text2: str) -> float:
@@ -22,17 +27,30 @@ class LexicalSimilarityProvider:
         return len(intersection) / len(union)
 
 class OpenAIEmbeddingProvider:
-    def __init__(self, api_key: str, model: str = "text-embedding-3-small"):
+    def __init__(self, api_key: str, cache: Optional[EmbeddingCache] = None, model: str = "text-embedding-3-small"):
         import openai
         self.client = openai.OpenAI(api_key=api_key)
         self.model = model
+        self.cache = cache
         
     def _get_embedding(self, text: str) -> List[float]:
+        text_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()
+        
+        if self.cache:
+            cached = self.cache.get_string_embedding(text_hash)
+            if cached is not None:
+                return cached
+                
         response = self.client.embeddings.create(
             input=[text],
             model=self.model
         )
-        return response.data[0].embedding
+        vec = response.data[0].embedding
+        
+        if self.cache:
+            self.cache.save_string_embedding(text_hash, vec)
+            
+        return vec
         
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         dot_product = sum(a * b for a, b in zip(vec1, vec2))

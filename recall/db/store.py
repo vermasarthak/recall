@@ -294,3 +294,20 @@ class StorageEngine:
             tx_to=parse_iso_utc(row["tx_to"]) if row["tx_to"] else None,
             fact_hash=row["fact_hash"]
         )
+
+    def get_string_embedding(self, text_hash: str) -> Optional[List[float]]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT embedding_json FROM string_embeddings WHERE text_hash = ?",
+                (text_hash,)
+            ).fetchone()
+            if row:
+                return json.loads(row["embedding_json"])
+        return None
+
+    def save_string_embedding(self, text_hash: str, embedding: List[float]) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO string_embeddings (text_hash, embedding_json) VALUES (?, ?)",
+                (text_hash, json.dumps(embedding))
+            )

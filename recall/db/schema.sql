@@ -80,3 +80,8 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sources_msg ON sources(message_id);
+
+CREATE TABLE IF NOT EXISTS string_embeddings (
+    text_hash TEXT PRIMARY KEY,
+    embedding_json TEXT NOT NULL
+);

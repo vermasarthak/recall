@@ -1,17 +1,42 @@
-from typing import List, Optional
+import os
+from typing import List, Optional, Dict
 from pydantic import BaseModel, Field
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
+from starlette.concurrency import run_in_threadpool
 
 from recall.client import Recall
 from recall.models.fact import FactRecord
 
-app = FastAPI(title="Recall Server", description="FastAPI Server for Recall Memory Engine")
+app = FastAPI(title="Recall Server", description="FastAPI Multi-Tenant Server for Recall Memory Engine")
 
-# Dependency / Global State
-# Note: In a production app, we would use a more robust lifecycle manager,
-# but this global initialization works for the MVP.
-recall_client = Recall(db_path="server.db")
+# Multi-tenant state manager
+class TenantManager:
+    def __init__(self, data_dir: str = "data"):
+        self.data_dir = data_dir
+        self.clients: Dict[str, Recall] = {}
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+
+    def get_client(self, tenant_id: str) -> Recall:
+        if not tenant_id.isalnum():
+            raise HTTPException(status_code=400, detail="Invalid Tenant ID format. Must be alphanumeric.")
+            
+        if tenant_id not in self.clients:
+            db_path = os.path.join(self.data_dir, f"{tenant_id}.db")
+            # In a real system, you might inject OpenAIEmbeddingProvider here
+            self.clients[tenant_id] = Recall(db_path=db_path)
+        return self.clients[tenant_id]
+
+    def close_all(self):
+        for client in self.clients.values():
+            client.close()
+
+tenant_manager = TenantManager()
+
+# Dependency to extract tenant client
+async def get_recall_client(x_tenant_id: str = Header(..., description="Tenant ID (e.g., user_123)")) -> Recall:
+    return tenant_manager.get_client(x_tenant_id)
 
 class IngestRequest(BaseModel):
     speaker: str
@@ -31,12 +56,14 @@ class PromptContextResponse(BaseModel):
 
 @app.on_event("shutdown")
 def shutdown_event():
-    recall_client.close()
+    tenant_manager.close_all()
 
 @app.post("/api/v1/ingest")
-def ingest_turn(req: IngestRequest):
+async def ingest_turn(req: IngestRequest, client: Recall = Depends(get_recall_client)):
     try:
-        result = recall_client.ingest_turn(
+        # Prevent event-loop blocking by running synchronous DB calls in a threadpool
+        result = await run_in_threadpool(
+            client.ingest_turn,
             speaker=req.speaker,
             text=req.text,
             conversation_id=req.conversation_id,
@@ -52,15 +79,15 @@ def ingest_turn(req: IngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/query")
-def query_memory(req: QueryRequest):
+async def query_memory(req: QueryRequest, client: Recall = Depends(get_recall_client)):
     try:
-        results = recall_client.query(
+        results = await run_in_threadpool(
+            client.query,
             about_entity=req.about_entity,
             context=req.context,
             min_salience=req.min_salience,
             limit=req.limit
         )
-        # Expose facts as dictionaries for JSON serialization
         return [
             {
                 "fact": r.fact.model_dump(),
@@ -71,9 +98,10 @@ def query_memory(req: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/query/prompt-context", response_model=PromptContextResponse)
-def get_prompt_context(req: QueryRequest):
+async def get_prompt_context(req: QueryRequest, client: Recall = Depends(get_recall_client)):
     try:
-        xml = recall_client.format_for_prompt(
+        xml = await run_in_threadpool(
+            client.format_for_prompt,
             about_entity=req.about_entity,
             context=req.context,
             min_salience=req.min_salience,
@@ -84,9 +112,9 @@ def get_prompt_context(req: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/history/{logical_id}")
-def get_history(logical_id: str):
+async def get_history(logical_id: str, client: Recall = Depends(get_recall_client)):
     try:
-        history = recall_client.inspect_history(logical_id)
+        history = await run_in_threadpool(client.inspect_history, logical_id)
         return [h.model_dump() for h in history]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
