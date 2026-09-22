@@ -50,6 +50,8 @@ def calculate_lexical_similarity(query_text: str, target_text: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+from recall.engine.similarity import SimilarityProvider, LexicalSimilarityProvider
+
 class SalienceScorer:
     """Computes composite contextual salience scores for query results."""
 
@@ -59,7 +61,8 @@ class SalienceScorer:
         weight_retention: float = 0.4,
         weight_confidence: float = 0.2,
         base_stability_days: float = 10.0,
-        alpha: float = 0.5
+        alpha: float = 0.5,
+        similarity_provider: Optional[SimilarityProvider] = None
     ):
         if weight_similarity < 0 or weight_retention < 0 or weight_confidence < 0:
             raise ValueError("All salience weights must be non-negative.")
@@ -72,6 +75,7 @@ class SalienceScorer:
         self.w_conf = weight_confidence
         self.base_stability = base_stability_days
         self.alpha = alpha
+        self.similarity_provider = similarity_provider or LexicalSimilarityProvider()
 
     def score_fact(
         self,
@@ -96,7 +100,7 @@ class SalienceScorer:
         )
 
         target_str = f"{fact.predicate} {fact.object_value}"
-        similarity = calculate_lexical_similarity(context_query, target_str)
+        similarity = self.similarity_provider.calculate_similarity(context_query, target_str)
         confidence = max(0.0, min(1.0, fact.confidence))
 
         composite = (self.w_sim * similarity) + (self.w_ret * retention) + (self.w_conf * confidence)

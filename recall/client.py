@@ -8,6 +8,7 @@ from recall.db.store import StorageEngine
 from recall.engine.decay import SalienceScorer
 from recall.engine.extractor import BaseExtractor, FixtureExtractor
 from recall.engine.ingest import EntityResolver, IngestionPipeline
+from recall.engine.similarity import SimilarityProvider
 from recall.models.entity import EntityCreate, EntityRecord, EntityType
 from recall.models.fact import FactCreate, FactRecord, SourceType
 from recall.models.query import IngestionResult, QueryResult, SalienceBreakdown
@@ -25,7 +26,8 @@ class Recall:
         weight_retention: float = 0.4,
         weight_confidence: float = 0.2,
         base_stability_days: float = 10.0,
-        alpha: float = 0.5
+        alpha: float = 0.5,
+        similarity_provider: Optional[SimilarityProvider] = None
     ):
         self.clock = clock or SystemClock()
         self.store = StorageEngine(db_path=db_path, clock=self.clock)
@@ -37,7 +39,8 @@ class Recall:
             weight_retention=weight_retention,
             weight_confidence=weight_confidence,
             base_stability_days=base_stability_days,
-            alpha=alpha
+            alpha=alpha,
+            similarity_provider=similarity_provider
         )
 
     def close(self) -> None:
@@ -281,6 +284,37 @@ class Recall:
 
         results.sort(key=lambda r: r.salience.composite_score, reverse=True)
         return results[:limit]
+
+    def format_for_prompt(
+        self,
+        about_entity: str,
+        context: str = "",
+        min_salience: float = 0.2,
+        valid_at: Optional[datetime] = None,
+        limit: int = 10
+    ) -> str:
+        """Formats the retrieved facts into a compressed XML structure optimized for LLM contexts."""
+        results = self.query(about_entity, context, min_salience, valid_at, limit=limit)
+        
+        if not results:
+            return f"<memory entity='{about_entity}'></memory>"
+            
+        xml_parts = [f"<memory entity='{results[0].subject_entity.canonical_name}' canonical_id='{results[0].subject_entity.id}'>"]
+        for res in results:
+            # Drop timezone information for compact LLM representation
+            v_from = res.fact.valid_from.strftime("%Y-%m-%d")
+            v_to = res.fact.valid_to.strftime("%Y-%m-%d") if res.fact.valid_to else "Present"
+            
+            xml_parts.append(
+                f"  <fact predicate='{res.fact.predicate}' "
+                f"valid_from='{v_from}' valid_to='{v_to}' "
+                f"confidence='{res.salience.confidence}' "
+                f"salience='{res.salience.composite_score}'>"
+                f"{res.fact.object_value}"
+                f"</fact>"
+            )
+        xml_parts.append("</memory>")
+        return "\n".join(xml_parts)
 
     def inspect_history(self, logical_id: str) -> List[FactRecord]:
         """Inspects complete version history for a logical assertion."""
