@@ -1,98 +1,108 @@
-# Recall: Temporal Entity Memory Engine
+<h1 align="center">
+  <img src="https://raw.githubusercontent.com/vermasarthak/recall/main/docs/logo.png" width="120" alt="Recall Logo" onerror="this.src='https://via.placeholder.com/120?text=🧠'"><br>
+  Recall
+</h1>
 
-`Recall` is a production-grade, bitemporal entity memory engine built for long-horizon AI agents, relationship companions, and social applications.
+<p align="center">
+  <strong>The Bitemporal Memory Engine for Long-Horizon AI Agents</strong>
+</p>
 
-Unlike traditional flat vector databases (which lack temporal awareness) or simple conversation scrolls (which hallucinate stale facts), Recall models memory as a **Bitemporal Knowledge Graph** with **Ebbinghaus retention decay**, **semantic conflict resolution**, and **contextual salience retrieval**.
+<p align="center">
+  <a href="https://github.com/vermasarthak/recall/actions"><img src="https://img.shields.io/github/actions/workflow/status/vermasarthak/recall/test.yml?style=flat-square" alt="Build Status"></a>
+  <a href="https://pypi.org/project/recall/"><img src="https://img.shields.io/pypi/v/recall?style=flat-square" alt="PyPI version"></a>
+  <a href="https://github.com/vermasarthak/recall/blob/main/LICENSE"><img src="https://img.shields.io/github/license/vermasarthak/recall?style=flat-square" alt="License"></a>
+</p>
 
-## 🚀 Features
+## The Problem
+Standard RAG relies on vector databases that append new facts endlessly. If a user tells an agent "I live in New York", and 6 months later says "I just moved to London", a standard RAG system will embed both. When the agent asks "Where does the user live?", the vector database returns both. The LLM hallucinates or gets confused. 
 
-- **Bitemporal Fact Storage:** Every fact has independent valid-time (when it was true) and transaction-time (when the system knew it) intervals.
-- **Deterministic Conflict Resolution:** Predicate policies handle multi-valued coexistence and single-valued conflict resolution with source precedence.
-- **Ebbinghaus Memory Decay:** Facts naturally decay using the Ebbinghaus retention function $R(t) = \exp(-t/S)$ unless reinforced by conversation.
-- **Proactive Contextual Salience:** Queries return scored facts evaluating lexical similarity, confidence, and retention.
-- **Entity Resolution:** Jaro-Winkler fuzzy matching with ambiguity boundaries.
-- **Offline & Local-First:** Pure Python + standard library SQLite3 (`sqlite3`). No cloud dependencies.
+Furthermore, memories decay. A minor detail mentioned 3 years ago shouldn't have the same context weight as a major life event mentioned yesterday.
 
-## 📦 Installation & Minimal Example
+## The Solution: Recall
+**Recall** is a thread-safe, bitemporal entity-graph memory engine designed specifically for long-horizon AI companions and agents. 
 
-```bash
-# Clone the repository
-git clone https://github.com/vermasarthak/recall.git
-cd recall
+It solves stateful memory through:
+1. **Bitemporal Fact Tracking**: Memories are tracked by when they were true (`valid_time`) and when the agent learned them (`knowledge_time`). When facts change, the old fact is gracefully closed, not deleted.
+2. **Ebbinghaus Salience Decay**: Memories automatically decay in relevance over time unless they are reinforced.
+3. **Global Semantic Vector Search**: Under the hood, facts are cached as vector embeddings, allowing $O(N)$ semantic RAG searches globally across the SQLite graph.
+4. **Deterministic Conflict Resolution**: New conflicting facts overwrite old ones deterministically, ensuring the LLM always gets a clean, conflict-free XML context block.
 
-# Install package
-pip install .
-```
-
-### Minimal Usage Example
-```python
-from datetime import datetime, timezone
-from recall import Recall
-
-# 1. Initialize offline client
-client = Recall(db_path="recall.db")
-
-# 2. Ingest structured turns (or use an LLM provider adapter)
-res = client.ingest_turn(
-    speaker="User",
-    text="John works at Google",
-    conversation_id="conv_1"
-)
-
-# 3. Time passes. Ingest a conflicting fact (John changes jobs)
-client.ingest_turn(
-    speaker="User",
-    text="John started working at Amazon",
-    conversation_id="conv_2",
-)
-
-# 4. Query current active memory
-q = client.query("John", context="Where does he work?")
-print(q[0].fact.object_value) # "Amazon"
-
-client.close()
-```
-
-## 🧠 Core Concepts
-
-### Valid Time vs Transaction Time
-Recall implements a true **bitemporal** model using half-open intervals:
-- **Valid Time (`valid_from`, `valid_to`)**: When the fact is true in the real world.
-- **Transaction Time (`tx_from`, `tx_to`)**: When the system knew the fact.
-
-If you learn today that someone changed jobs 2 months ago, Recall correctly branches historical knowledge without mutating past audit traces. You can query "What did we *believe* about John last month?" and get the historically accurate response.
-
-### Predicate Cardinality & Conflict Policies
-Not all facts conflict.
-- **Single-Valued Predicates** (e.g., `primary_employer`, `residence`): A new high-confidence fact cleanly invalidates the old fact's `valid_to` interval.
-- **Multi-Valued Predicates** (e.g., `speaks_language`, `likes`): Distinct facts cleanly coexist concurrently.
-- **Retraction / Correction**: Explicit user edits override inference and hearsay via strict source precedence.
-
-### Ebbinghaus Retention Scoring
-Facts you don't reinforce naturally decay in relevance. 
-The Ebbinghaus retention is given by: $R(t) = \exp(-t/S)$
-Where $S = S_{\text{base}} \times (1 + \alpha \cdot N)$.
-- $S_{\text{base}}$ = Base stability (default 10 days)
-- $N$ = Number of independent conversational reinforcements.
-
-## 🧪 Running the Demo and Tests
-
-### Run the Offline WhatsApp Timeline Demo
-Run the provided simulated 6-month offline WhatsApp timeline demo which showcases all core mechanics (fact transitions, reinforcements, history rewrites, and proactive relationship cues):
-```bash
-python examples/demo_whatsapp_timeline.py
-```
-
-### Run the Test Suite
-The package includes a rigorous offline test suite verifying interval bounding, decay mathematics, provider serialization, and entity resolution constraints.
-```bash
-pytest -v
-```
-
-## ⚠️ Known Limitations
-- **Concurrency:** Uses standard SQLite `WAL` mode. Designed for single-tenant or low-concurrency environments (one DB per memory owner). Do not use this as a distributed multi-tenant datastore.
-- **Lexical Salience:** Default salience uses Jaccard lexical overlap. Semantic embedding endpoints (e.g., OpenAI embeddings) can be injected but are omitted by default to ensure the engine runs completely offline.
-- **Timezone Safety:** Recall enforces strict timezone-aware (UTC) `datetime` objects. Naive datetimes will raise strict validation errors.
+## Features
+- 🚀 **Multi-Tenant FastAPI Server**: Built-in HTTP server with Bearer auth and Multi-tenant SQLite isolation (O(1) routing).
+- 🧠 **Vector RAG Fallback**: Perform semantic queries against memory nodes when you don't know the exact Entity ID.
+- 🧵 **Extreme Concurrency**: Hand-optimized Python SQLite drivers using thread-local pooling and WAL mode `RLock` mutexes for massive scale.
+- 🗑️ **Garbage Collection & GDPR**: Delete isolated graphs or vacuum retracted historical data to save disk space.
+- ⚡ **Async Python SDK**: Drop-in Python client (`RecallRemoteClient`) for seamless integration into your Agent loops.
 
 ---
-Built for the next generation of social AI agents.
+
+## Quickstart
+
+### 1. Installation
+```bash
+pip install recall
+```
+
+### 2. Start the Recall Server
+Run the production-ready server via Docker, or locally:
+```bash
+export OPENAI_API_KEY="sk-..."
+export RECALL_API_KEY="your-secret-key"
+uvicorn recall.server.app:app --port 8000
+```
+
+### 3. Use the Python SDK in your Agent
+```python
+import asyncio
+from recall.remote import AsyncRecallRemoteClient
+
+async def main():
+    async with AsyncRecallRemoteClient("http://localhost:8000", "your-secret-key") as client:
+        
+        # 1. Ingest a user's chat message
+        await client.ingest_turn(
+            tenant_id="user_123",
+            speaker="User",
+            text="I just got a new job at OpenAI! Moving to SF tomorrow.",
+            conversation_id="conv_001"
+        )
+        
+        # 2. Query memory semantically later
+        results = await client.search(tenant_id="user_123", query="where do they work?")
+        
+        # 3. Format as a compressed XML block for your LLM Prompt
+        xml_context = await client.format_for_prompt(tenant_id="user_123", about_entity="User")
+        print(xml_context)
+        # <memory entity='User'>
+        #   <fact confidence='0.95'>works_at OpenAI</fact>
+        #   <fact confidence='0.95'>lives_in San Francisco</fact>
+        # </memory>
+
+asyncio.run(main())
+```
+
+### 4. Command Line Interface
+Recall ships with a built-in CLI for quick memory introspection:
+```bash
+recall --tenant user_123 search "OpenAI"
+```
+
+---
+
+## How It Works
+
+### The Ebbinghaus Salience Scorer
+Recall uses a custom scoring algorithm to determine which facts are injected into your LLM's context window. The `Composite Score` combines:
+1. **Semantic Similarity (40%)**: Cosine similarity between the agent's current query and the memory embedding.
+2. **Retention (40%)**: An Ebbinghaus forgetting curve based on `elapsed_days` since the memory was last reinforced.
+3. **Confidence (20%)**: The extraction confidence of the LLM pipeline.
+
+### Try the Showcase AI Companion!
+See the engine in action. We've included a terminal-based Chat Companion that uses the embedded `Recall` engine to talk to you.
+```bash
+export OPENAI_API_KEY="sk-..."
+python examples/chat_companion.py
+```
+
+---
+*Built for the future of Stateful AI.*
