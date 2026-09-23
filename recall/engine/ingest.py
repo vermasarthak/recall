@@ -1,15 +1,17 @@
 """Ingestion pipeline executing entity resolution, validation, and atomic storage."""
 
-from datetime import datetime
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
 
 from recall.config import Clock, ensure_utc, to_iso_utc
 from recall.db.store import StorageEngine
 from recall.engine.conflict import ConflictResolver
-from recall.engine.extractor import ExtractedEntityCandidate, ExtractedFactCandidate, ExtractedTurn, jaro_winkler_similarity
+from recall.engine.extractor import (
+    ExtractedTurn,
+    jaro_winkler_similarity,
+)
 from recall.models.entity import EntityCreate, EntityRecord, EntityType
-from recall.models.fact import FactCreate, FactRecord
+from recall.models.fact import FactCreate
 from recall.models.query import IngestionResult
 
 
@@ -21,9 +23,11 @@ class EntityResolver:
         self.threshold = similarity_threshold
         self.margin = ambiguity_margin
 
-    def resolve(self, name_or_alias: str, default_type: EntityType = EntityType.PERSON, now: Optional[datetime] = None) -> Tuple[EntityRecord, bool]:
+    def resolve(
+        self, name_or_alias: str, default_type: EntityType = EntityType.PERSON, now: datetime | None = None
+    ) -> tuple[EntityRecord, bool]:
         """Resolves a candidate entity name or alias.
-        
+
         Returns:
             (EntityRecord, is_ambiguous)
         """
@@ -44,7 +48,7 @@ class EntityResolver:
                 return (ent, False)
 
         # 3. Fuzzy Jaro-Winkler match
-        candidates: List[Tuple[EntityRecord, float]] = []
+        candidates: list[tuple[EntityRecord, float]] = []
         for ent in all_entities:
             score = jaro_winkler_similarity(clean_name, ent.canonical_name)
             for alias in ent.aliases:
@@ -67,12 +71,7 @@ class EntityResolver:
 
         # 4. Create new entity
         new_ent = self.store.create_entity(
-            EntityCreate(
-                type=default_type,
-                canonical_name=clean_name.capitalize(),
-                aliases=[clean_name]
-            ),
-            now=now
+            EntityCreate(type=default_type, canonical_name=clean_name.capitalize(), aliases=[clean_name]), now=now
         )
         return (new_ent, False)
 
@@ -90,10 +89,10 @@ class IngestionPipeline:
         self,
         turn: ExtractedTurn,
         conv_id: str,
-        message_id: Optional[str] = None,
-        speaker: Optional[str] = None,
-        event_time: Optional[datetime] = None,
-        now: Optional[datetime] = None
+        message_id: str | None = None,
+        speaker: str | None = None,
+        event_time: datetime | None = None,
+        now: datetime | None = None,
     ) -> IngestionResult:
         """Process structured extraction turn into atomic versioned database writes."""
         tx_now = ensure_utc(now or self.clock.now())
@@ -106,17 +105,23 @@ class IngestionPipeline:
             conn.execute(
                 """INSERT OR IGNORE INTO sources (id, message_id, speaker, raw_text, conv_id, event_time, tx_time)
                    VALUES (?, ?, ?, ?, ?, ?, ?);""",
-                (f"src_{uuid.uuid4().hex[:12]}", source_ref, speaker, "", conv_id, to_iso_utc(ev_time), to_iso_utc(tx_now))
+                (
+                    f"src_{uuid.uuid4().hex[:12]}",
+                    source_ref,
+                    speaker,
+                    "",
+                    conv_id,
+                    to_iso_utc(ev_time),
+                    to_iso_utc(tx_now),
+                ),
             )
 
         # Resolve temp_ids to DB EntityRecords
-        temp_id_map: Dict[str, EntityRecord] = {}
+        temp_id_map: dict[str, EntityRecord] = {}
 
         for cand_ent in turn.entities:
             resolved_ent, is_amb = self.resolver.resolve(
-                cand_ent.canonical_name,
-                default_type=cand_ent.type,
-                now=tx_now
+                cand_ent.canonical_name, default_type=cand_ent.type, now=tx_now
             )
             temp_id_map[cand_ent.temp_id] = resolved_ent
             temp_id_map[cand_ent.canonical_name.lower()] = resolved_ent
@@ -138,14 +143,11 @@ class IngestionPipeline:
                 confidence=cand_fact.confidence,
                 source_type=cand_fact.source_type,
                 source_ref=source_ref,
-                valid_from=cand_fact.valid_from or ev_time
+                valid_from=cand_fact.valid_from or ev_time,
             )
 
             record, reinf_id, unresolved = self.conflict_resolver.resolve_and_apply_fact(
-                candidate=fact_create,
-                subject_id=subj_ent.id,
-                event_time=ev_time,
-                now=tx_now
+                candidate=fact_create, subject_id=subj_ent.id, event_time=ev_time, now=tx_now
             )
 
             if record:

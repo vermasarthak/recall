@@ -2,23 +2,23 @@
 
 from recall.client import Recall
 from recall.config import Clock, SystemClock, TestClock
-from recall.models.entity import EntityType, EntityCreate, EntityRecord
-from recall.models.fact import FactCreate, FactRecord, SourceType, PredicatePolicy
+from recall.models.entity import EntityCreate, EntityRecord, EntityType
+from recall.models.fact import FactCreate, FactRecord, PredicatePolicy, SourceType
 from recall.models.query import QueryResult, SalienceBreakdown
 
 __version__ = "0.1.0"
 __all__ = [
-    "Recall",
     "Clock",
-    "SystemClock",
-    "TestClock",
-    "EntityType",
     "EntityCreate",
     "EntityRecord",
+    "EntityType",
     "FactCreate",
     "FactRecord",
-    "SourceType",
     "PredicatePolicy",
     "QueryResult",
+    "Recall",
     "SalienceBreakdown",
+    "SourceType",
+    "SystemClock",
+    "TestClock",
 ]

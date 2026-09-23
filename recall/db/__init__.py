@@ -1,5 +1,5 @@
 """Database storage package."""
 
-from recall.db.store import StorageEngine, canonical_json_dumps, calculate_fact_hash
+from recall.db.store import StorageEngine, calculate_fact_hash, canonical_json_dumps
 
-__all__ = ["StorageEngine", "canonical_json_dumps", "calculate_fact_hash"]
+__all__ = ["StorageEngine", "calculate_fact_hash", "canonical_json_dumps"]

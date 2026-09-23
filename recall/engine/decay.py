@@ -1,29 +1,26 @@
 """Decay calculator and contextual salience scoring engine for Recall."""
 
-from datetime import datetime, timezone
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
 
 from recall.config import ensure_utc
+from recall.engine.similarity import LexicalSimilarityProvider, SimilarityProvider
 from recall.models.fact import FactRecord
 from recall.models.query import SalienceBreakdown
 
 
 def calculate_retention(
-    elapsed_days: float,
-    reinforcements_count: int,
-    base_stability_days: float = 10.0,
-    alpha: float = 0.5
+    elapsed_days: float, reinforcements_count: int, base_stability_days: float = 10.0, alpha: float = 0.5
 ) -> float:
     """Calculates Ebbinghaus memory retention score R(t) = exp(-t / S).
-    
+
     Args:
         elapsed_days: Non-negative elapsed time t in days.
         reinforcements_count: Count N of independent reinforcement events.
         base_stability_days: S_base > 0 (default: 10.0 days).
         alpha: Reinforcement stability gain factor >= 0 (default: 0.5).
-        
+
     Returns:
         Retention score R(t) in range (0.0, 1.0].
     """
@@ -50,8 +47,6 @@ def calculate_lexical_similarity(query_text: str, target_text: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-from recall.engine.similarity import SimilarityProvider, LexicalSimilarityProvider
-
 class SalienceScorer:
     """Computes composite contextual salience scores for query results."""
 
@@ -62,7 +57,7 @@ class SalienceScorer:
         weight_confidence: float = 0.2,
         base_stability_days: float = 10.0,
         alpha: float = 0.5,
-        similarity_provider: Optional[SimilarityProvider] = None
+        similarity_provider: SimilarityProvider | None = None,
     ):
         if weight_similarity < 0 or weight_retention < 0 or weight_confidence < 0:
             raise ValueError("All salience weights must be non-negative.")
@@ -83,7 +78,7 @@ class SalienceScorer:
         context_query: str,
         valid_at: datetime,
         reinforcements_count: int,
-        latest_event_time: Optional[datetime] = None
+        latest_event_time: datetime | None = None,
     ) -> SalienceBreakdown:
         v_at = ensure_utc(valid_at)
         ref_time = ensure_utc(latest_event_time or fact.valid_from)
@@ -96,7 +91,7 @@ class SalienceScorer:
             elapsed_days=elapsed_days,
             reinforcements_count=reinforcements_count,
             base_stability_days=self.base_stability,
-            alpha=self.alpha
+            alpha=self.alpha,
         )
 
         target_str = f"{fact.predicate} {fact.object_value}"
@@ -110,5 +105,5 @@ class SalienceScorer:
             similarity=round(similarity, 4),
             retention=round(retention, 4),
             confidence=round(confidence, 4),
-            composite_score=round(composite, 4)
+            composite_score=round(composite, 4),
         )

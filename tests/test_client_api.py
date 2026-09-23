@@ -1,16 +1,14 @@
 """Tests for public Recall client API, context manager, and end-to-end workflows."""
 
-from datetime import datetime, timezone, timedelta
-import pytest
+from datetime import UTC, datetime
+
 from recall.client import Recall
 from recall.config import TestClock
-from recall.models.entity import EntityType
-from recall.models.fact import FactCreate, SourceType
 
 
 def test_end_to_end_client_workflow(tmp_path):
     db_file = str(tmp_path / "recall_test.db")
-    start_time = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    start_time = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
     clock = TestClock(start_time)
 
     with Recall(db_path=db_file, clock=clock) as client:
@@ -20,7 +18,7 @@ def test_end_to_end_client_workflow(tmp_path):
             text="John works at Google",
             conversation_id="conv_1",
             message_id="msg_1",
-            timestamp=start_time
+            timestamp=start_time,
         )
         assert len(res1.inserted_facts) == 1
         assert res1.inserted_facts[0].object_value == "Google"
@@ -31,7 +29,7 @@ def test_end_to_end_client_workflow(tmp_path):
         assert q1[0].fact.object_value == "Google"
 
         # 2. Advance clock to July 1, 2026: John started working at Amazon
-        july_1 = datetime(2026, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
+        july_1 = datetime(2026, 7, 1, 0, 0, 0, tzinfo=UTC)
         clock.set(july_1)
 
         res2 = client.ingest_turn(
@@ -39,7 +37,7 @@ def test_end_to_end_client_workflow(tmp_path):
             text="John started working at Amazon",
             conversation_id="conv_2",
             message_id="msg_2",
-            timestamp=july_1
+            timestamp=july_1,
         )
         assert len(res2.inserted_facts) == 1
         assert res2.inserted_facts[0].object_value == "Amazon"
@@ -56,11 +54,7 @@ def test_end_to_end_client_workflow(tmp_path):
 
         # 3. Explicit correction
         amazon_logical_id = res2.inserted_facts[0].logical_id
-        corr = client.correct_fact(
-            logical_id=amazon_logical_id,
-            new_object_value="AWS",
-            source_ref="user_correction"
-        )
+        corr = client.correct_fact(logical_id=amazon_logical_id, new_object_value="AWS", source_ref="user_correction")
         assert corr.object_value == "AWS"
 
         # Query July 1 -> sees AWS
@@ -74,10 +68,11 @@ def test_end_to_end_client_workflow(tmp_path):
         assert len(q_persist) == 1
         assert q_persist[0].fact.object_value == "AWS"
 
+
 def test_global_semantic_search():
     from recall.client import Recall
     from recall.engine.similarity import SimilarityProvider
-    
+
     # Simple mock similarity that returns 0.9 if words overlap
     class MockSim(SimilarityProvider):
         def calculate_similarity(self, text_a: str, text_b: str) -> float:
@@ -86,11 +81,11 @@ def test_global_semantic_search():
             if words_a & words_b:
                 return 0.9
             return 0.1
-            
+
     client = Recall(db_path=":memory:", similarity_provider=MockSim())
     client.ingest_turn("John", "John likes StarWars", "c1")
     client.ingest_turn("Alice", "Alice likes cookies", "c1")
-    
+
     # Now semantic search without knowing the entity!
     results = client.search(query="watching StarWars movies", min_score=0.7)
     assert len(results) == 1

@@ -1,7 +1,7 @@
 """Public client API for Recall temporal entity memory engine."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from recall.config import Clock, SystemClock, ensure_utc
 from recall.db.store import StorageEngine
@@ -11,7 +11,7 @@ from recall.engine.ingest import EntityResolver, IngestionPipeline
 from recall.engine.similarity import SimilarityProvider
 from recall.models.entity import EntityCreate, EntityRecord, EntityType
 from recall.models.fact import FactCreate, FactRecord, SourceType
-from recall.models.query import IngestionResult, QueryResult, SalienceBreakdown
+from recall.models.query import IngestionResult, QueryResult
 
 
 class Recall:
@@ -20,14 +20,14 @@ class Recall:
     def __init__(
         self,
         db_path: str = "recall.db",
-        clock: Optional[Clock] = None,
-        extractor: Optional[BaseExtractor] = None,
+        clock: Clock | None = None,
+        extractor: BaseExtractor | None = None,
         weight_similarity: float = 0.4,
         weight_retention: float = 0.4,
         weight_confidence: float = 0.2,
         base_stability_days: float = 10.0,
         alpha: float = 0.5,
-        similarity_provider: Optional[SimilarityProvider] = None
+        similarity_provider: SimilarityProvider | None = None,
     ):
         self.clock = clock or SystemClock()
         self.store = StorageEngine(db_path=db_path, clock=self.clock)
@@ -40,7 +40,7 @@ class Recall:
             weight_confidence=weight_confidence,
             base_stability_days=base_stability_days,
             alpha=alpha,
-            similarity_provider=similarity_provider
+            similarity_provider=similarity_provider,
         )
 
     def close(self) -> None:
@@ -58,20 +58,15 @@ class Recall:
         self,
         canonical_name: str,
         type: EntityType = EntityType.PERSON,
-        aliases: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        aliases: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> EntityRecord:
         """Creates a new entity explicitly."""
         return self.store.create_entity(
-            EntityCreate(
-                type=type,
-                canonical_name=canonical_name,
-                aliases=aliases or [],
-                metadata=metadata or {}
-            )
+            EntityCreate(type=type, canonical_name=canonical_name, aliases=aliases or [], metadata=metadata or {})
         )
 
-    def get_entity(self, entity_id_or_name: str) -> Optional[EntityRecord]:
+    def get_entity(self, entity_id_or_name: str) -> EntityRecord | None:
         """Fetches entity by ID or canonical name."""
         ent = self.store.get_entity_by_id(entity_id_or_name)
         if ent:
@@ -85,8 +80,8 @@ class Recall:
         speaker: str,
         text: str,
         conversation_id: str,
-        timestamp: Optional[datetime] = None,
-        message_id: Optional[str] = None
+        timestamp: datetime | None = None,
+        message_id: str | None = None,
     ) -> IngestionResult:
         """Ingests a conversational turn, extracts facts, resolves entities, and persists updates atomically."""
         now_time = self.clock.now()
@@ -98,15 +93,15 @@ class Recall:
             message_id=message_id,
             speaker=speaker,
             event_time=ev_time,
-            now=now_time
+            now=now_time,
         )
 
     def ingest_structured(
         self,
-        facts: List[FactCreate],
+        facts: list[FactCreate],
         conversation_id: str,
-        message_id: Optional[str] = None,
-        timestamp: Optional[datetime] = None
+        message_id: str | None = None,
+        timestamp: datetime | None = None,
     ) -> IngestionResult:
         """Direct ingestion of validated structured fact assertions without LLM extraction."""
         now_time = self.clock.now()
@@ -124,13 +119,10 @@ class Recall:
                 confidence=f.confidence,
                 source_type=f.source_type,
                 source_ref=f.source_ref or message_id or "structured",
-                valid_from=f.valid_from or ev_time
+                valid_from=f.valid_from or ev_time,
             )
             rec, reinf, unres = self.pipeline.conflict_resolver.resolve_and_apply_fact(
-                candidate=f_create,
-                subject_id=subj_ent.id,
-                event_time=ev_time,
-                now=now_time
+                candidate=f_create, subject_id=subj_ent.id, event_time=ev_time, now=now_time
             )
             if rec:
                 result.inserted_facts.append(rec)
@@ -144,11 +136,7 @@ class Recall:
     # --- CORRECTION / RETRACTION API ---
 
     def correct_fact(
-        self,
-        logical_id: str,
-        new_object_value: Any,
-        source_ref: str,
-        valid_from: Optional[datetime] = None
+        self, logical_id: str, new_object_value: Any, source_ref: str, valid_from: datetime | None = None
     ) -> FactRecord:
         """Corrects an existing logical fact by writing a revised version while preserving historical trace."""
         history = self.store.query_history(logical_id)
@@ -166,19 +154,16 @@ class Recall:
             confidence=1.0,
             source_type=SourceType.USER_EDIT,
             source_ref=source_ref,
-            valid_from=v_from
+            valid_from=v_from,
         )
         rec, _, _ = self.pipeline.conflict_resolver.resolve_and_apply_fact(
-            candidate=f_create,
-            subject_id=target.subject_id,
-            event_time=v_from,
-            now=now_time
+            candidate=f_create, subject_id=target.subject_id, event_time=v_from, now=now_time
         )
         if not rec:
             raise RuntimeError("Failed to write correction version.")
         return rec
 
-    def retract_fact(self, logical_id: str, source_ref: str, valid_from: Optional[datetime] = None) -> None:
+    def retract_fact(self, logical_id: str, source_ref: str, valid_from: datetime | None = None) -> None:
         """Retracts an active logical fact without deleting historical assertion evidence."""
         history = self.store.query_history(logical_id)
         if not history:
@@ -195,13 +180,15 @@ class Recall:
             confidence=1.0,
             source_type=SourceType.USER_EDIT,
             source_ref=source_ref,
-            valid_from=v_from
+            valid_from=v_from,
         )
         # Apply retraction against target predicate
         f_create.predicate = target.predicate
         conn = self.store.get_connection()
         with conn:
-            active_facts = self.store.query_facts(subject_id=target.subject_id, predicate=target.predicate, valid_at=v_from, known_at=now_time)
+            active_facts = self.store.query_facts(
+                subject_id=target.subject_id, predicate=target.predicate, valid_at=v_from, known_at=now_time
+            )
             for act in active_facts:
                 if act.logical_id == logical_id:
                     self.store.close_fact_tx_to(act.version_id, tx_to=now_time, conn=conn)
@@ -220,11 +207,11 @@ class Recall:
                             valid_to=v_from,
                             tx_from=now_time,
                             tx_to=None,
-                            fact_hash=act.fact_hash
+                            fact_hash=act.fact_hash,
                         )
                         self.store.insert_fact_version(revised, conn=conn)
 
-    def reinforce_fact(self, logical_id: str, source_ref: str, timestamp: Optional[datetime] = None) -> str:
+    def reinforce_fact(self, logical_id: str, source_ref: str, timestamp: datetime | None = None) -> str:
         """Explicitly reinforces a logical fact."""
         now_time = self.clock.now()
         rf_time = ensure_utc(timestamp or now_time)
@@ -237,13 +224,13 @@ class Recall:
         about_entity: str,
         context: str = "",
         min_salience: float = 0.2,
-        valid_at: Optional[datetime] = None,
-        known_at: Optional[datetime] = None,
-        as_of: Optional[datetime] = None,
-        limit: int = 10
-    ) -> List[QueryResult]:
+        valid_at: datetime | None = None,
+        known_at: datetime | None = None,
+        as_of: datetime | None = None,
+        limit: int = 10,
+    ) -> list[QueryResult]:
         """Queries facts for an entity, computing contextual retention salience scores.
-        
+
         Note: as_of is a backward-compatible alias for valid_at.
         """
         now_time = self.clock.now()
@@ -257,7 +244,7 @@ class Recall:
 
         active_facts = self.store.query_facts(subject_id=ent.id, valid_at=v_at, known_at=k_at)
 
-        results: List[QueryResult] = []
+        results: list[QueryResult] = []
 
         for fact in active_facts:
             # Count reinforcements visible at known_at and valid_at
@@ -268,85 +255,73 @@ class Recall:
                 context_query=context,
                 valid_at=v_at,
                 reinforcements_count=n_reinf,
-                latest_event_time=fact.valid_from
+                latest_event_time=fact.valid_from,
             )
 
             if salience.composite_score >= min_salience:
                 obj_ent = self.get_entity(fact.object_entity_id) if fact.object_entity_id else None
-                results.append(
-                    QueryResult(
-                        fact=fact,
-                        salience=salience,
-                        subject_entity=ent,
-                        object_entity=obj_ent
-                    )
-                )
+                results.append(QueryResult(fact=fact, salience=salience, subject_entity=ent, object_entity=obj_ent))
 
         results.sort(key=lambda r: r.salience.composite_score, reverse=True)
         return results[:limit]
 
-
-    def search(self, query: str, limit: int = 10, min_score: float = 0.5) -> List[QueryResult]:
+    def search(self, query: str, limit: int = 10, min_score: float = 0.5) -> list[QueryResult]:
         """Global semantic search across all facts using vector similarity and salience decay."""
         now_time = self.clock.now()
-        
+
         # 1. Fetch all active facts globally
         active_facts = self.store.query_facts(valid_at=now_time, known_at=now_time)
-        
-        results: List[QueryResult] = []
+
+        results: list[QueryResult] = []
         for fact in active_facts:
             # 2. Score fact contextually against the global query
-            n_reinf = self.store.get_reinforcements_count(fact.logical_id, max_reinforced_at=now_time, max_tx_time=now_time)
+            n_reinf = self.store.get_reinforcements_count(
+                fact.logical_id, max_reinforced_at=now_time, max_tx_time=now_time
+            )
             salience = self.salience_scorer.score_fact(
                 fact=fact,
                 context_query=query,
                 valid_at=now_time,
                 reinforcements_count=n_reinf,
             )
-            
+
             if salience.composite_score >= min_score:
                 sub_ent = self.store.get_entity_by_id(fact.subject_id)
                 obj_ent = self.store.get_entity_by_id(fact.object_entity_id) if fact.object_entity_id else None
                 if sub_ent:
                     results.append(
-                        QueryResult(
-                            fact=fact,
-                            salience=salience,
-                            subject_entity=sub_ent,
-                            object_entity=obj_ent
-                        )
+                        QueryResult(fact=fact, salience=salience, subject_entity=sub_ent, object_entity=obj_ent)
                     )
-                    
+
         results.sort(key=lambda r: r.salience.composite_score, reverse=True)
         return results[:limit]
 
     def format_for_prompt(
-
         self,
         about_entity: str,
         context: str = "",
         min_salience: float = 0.2,
-        valid_at: Optional[datetime] = None,
+        valid_at: datetime | None = None,
         limit: int = 10,
-        max_tokens: Optional[int] = None
+        max_tokens: int | None = None,
     ) -> str:
         """Formats the retrieved facts into a compressed XML structure optimized for LLM contexts."""
         results = self.query(about_entity, context, min_salience, valid_at, limit=limit)
-        
+
         if not results:
             return f"<memory entity='{about_entity}'></memory>"
-            
+
         # Heuristic: 1 token ≈ 4 characters
         max_chars = (max_tokens * 4) if max_tokens else None
-        
+
         header = f"<memory entity='{results[0].subject_entity.canonical_name}' canonical_id='{results[0].subject_entity.id}'>"
         xml_parts = [header]
         current_chars = len(header) + len("\n</memory>")
-        
+
         for res in results:
             v_from = res.fact.valid_from.strftime("%Y-%m-%d")
             v_to = res.fact.valid_to.strftime("%Y-%m-%d") if res.fact.valid_to else "Present"
-            
+
             fact_str = (
                 f"  <fact predicate='{res.fact.predicate}' "
                 f"valid_from='{v_from}' valid_to='{v_to}' "
@@ -355,20 +330,20 @@ class Recall:
                 f"{res.fact.object_value}"
                 f"</fact>"
             )
-            
+
             if max_chars and (current_chars + len(fact_str) + 1) > max_chars:
                 break
-                
+
             xml_parts.append(fact_str)
             current_chars += len(fact_str) + 1
-            
+
         xml_parts.append("</memory>")
         return "\n".join(xml_parts)
 
     def vacuum_history(self, retention_days: int = 30) -> int:
         """Triggers a hard delete of retracted historical facts older than the retention window."""
         return self.store.vacuum_history(retention_days)
-        
+
     def forget(self, about_entity: str) -> int:
         """GDPR Right to be Forgotten: Permanently deletes all trace of an entity."""
         ent = self.get_entity(about_entity)
@@ -376,6 +351,6 @@ class Recall:
             return 0
         return self.store.forget_entity(ent.id)
 
-    def inspect_history(self, logical_id: str) -> List[FactRecord]:
+    def inspect_history(self, logical_id: str) -> list[FactRecord]:
         """Inspects complete version history for a logical assertion."""
         return self.store.query_history(logical_id)

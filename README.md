@@ -57,20 +57,20 @@ uvicorn recall.server.app:app --port 8000
 import asyncio
 from recall.remote import AsyncRecallRemoteClient
 
+
 async def main():
     async with AsyncRecallRemoteClient("http://localhost:8000", "your-secret-key") as client:
-        
         # 1. Ingest a user's chat message
         await client.ingest_turn(
             tenant_id="user_123",
             speaker="User",
             text="I just got a new job at OpenAI! Moving to SF tomorrow.",
-            conversation_id="conv_001"
+            conversation_id="conv_001",
         )
-        
+
         # 2. Query memory semantically later
         results = await client.search(tenant_id="user_123", query="where do they work?")
-        
+
         # 3. Format as a compressed XML block for your LLM Prompt
         xml_context = await client.format_for_prompt(tenant_id="user_123", about_entity="User")
         print(xml_context)
@@ -78,6 +78,7 @@ async def main():
         #   <fact confidence='0.95'>works_at OpenAI</fact>
         #   <fact confidence='0.95'>lives_in San Francisco</fact>
         # </memory>
+
 
 asyncio.run(main())
 ```

@@ -1,17 +1,16 @@
 """Entity resolution, Jaro-Winkler fuzzy matching, and extraction provider interfaces."""
 
+import json
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime
-import json
-import os
-import re
+from typing import Any
 
-from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 
-from recall.config import Clock, ensure_utc
-from recall.models.entity import EntityCreate, EntityRecord, EntityType
-from recall.models.fact import FactCreate, SourceType
+from recall.config import ensure_utc
+from recall.models.entity import EntityType
+from recall.models.fact import SourceType
 
 
 def jaro_winkler_similarity(s1: str, s2: str, p: float = 0.1) -> float:
@@ -24,8 +23,7 @@ def jaro_winkler_similarity(s1: str, s2: str, p: float = 0.1) -> float:
         return 0.0
 
     match_distance = max(len1, len2) // 2 - 1
-    if match_distance < 0:
-        match_distance = 0
+    match_distance = max(match_distance, 0)
 
     s1_matches = [False] * len1
     s2_matches = [False] * len2
@@ -77,7 +75,7 @@ class ExtractedEntityCandidate(BaseModel):
     temp_id: str
     type: EntityType
     canonical_name: str
-    aliases: List[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
 
 
 class ExtractedFactCandidate(BaseModel):
@@ -86,12 +84,12 @@ class ExtractedFactCandidate(BaseModel):
     object_value: Any
     confidence: float = 1.0
     source_type: SourceType = SourceType.DIRECT_STATEMENT
-    valid_from: Optional[datetime] = None
+    valid_from: datetime | None = None
 
 
 class ExtractedTurn(BaseModel):
-    entities: List[ExtractedEntityCandidate] = Field(default_factory=list)
-    facts: List[ExtractedFactCandidate] = Field(default_factory=list)
+    entities: list[ExtractedEntityCandidate] = Field(default_factory=list)
+    facts: list[ExtractedFactCandidate] = Field(default_factory=list)
 
 
 class BaseExtractor(ABC):
@@ -121,8 +119,8 @@ class FixtureExtractor(BaseExtractor):
 
     def extract(self, speaker: str, text: str, event_time: datetime) -> ExtractedTurn:
         ev_time = ensure_utc(event_time)
-        entities: Dict[str, ExtractedEntityCandidate] = {}
-        facts: List[ExtractedFactCandidate] = []
+        entities: dict[str, ExtractedEntityCandidate] = {}
+        facts: list[ExtractedFactCandidate] = []
 
         # Add speaker entity
         speaker_name = speaker.capitalize()
@@ -130,7 +128,7 @@ class FixtureExtractor(BaseExtractor):
             temp_id=f"temp_{speaker_name.lower()}",
             type=EntityType.PERSON,
             canonical_name=speaker_name,
-            aliases=[speaker]
+            aliases=[speaker],
         )
 
         for pattern, predicate, obj_type in self._rules:
@@ -141,17 +139,13 @@ class FixtureExtractor(BaseExtractor):
 
                 if subj_name not in entities:
                     entities[subj_name] = ExtractedEntityCandidate(
-                        temp_id=f"temp_{subj_name.lower()}",
-                        type=EntityType.PERSON,
-                        canonical_name=subj_name
+                        temp_id=f"temp_{subj_name.lower()}", type=EntityType.PERSON, canonical_name=subj_name
                     )
 
                 obj_temp_id = f"temp_{obj_name.lower()}"
                 if obj_name not in entities:
                     entities[obj_name] = ExtractedEntityCandidate(
-                        temp_id=obj_temp_id,
-                        type=obj_type,
-                        canonical_name=obj_name
+                        temp_id=obj_temp_id, type=obj_type, canonical_name=obj_name
                     )
 
                 facts.append(
@@ -161,7 +155,7 @@ class FixtureExtractor(BaseExtractor):
                         object_value=obj_name,
                         confidence=0.95,
                         source_type=SourceType.DIRECT_STATEMENT,
-                        valid_from=ev_time
+                        valid_from=ev_time,
                     )
                 )
 
@@ -171,7 +165,13 @@ class FixtureExtractor(BaseExtractor):
 class OpenAIProviderAdapter(BaseExtractor):
     """Structured extraction adapter for OpenAI/OpenRouter compatible endpoints."""
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: str = "https://api.openai.com/v1", timeout_sec: float = 10.0):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-mini",
+        base_url: str = "https://api.openai.com/v1",
+        timeout_sec: float = 10.0,
+    ):
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -179,7 +179,8 @@ class OpenAIProviderAdapter(BaseExtractor):
 
     def extract(self, speaker: str, text: str, event_time: datetime) -> ExtractedTurn:
         import urllib.request
-        ev_time = ensure_utc(event_time)
+
+        ensure_utc(event_time)
 
         prompt = (
             f"Extract entities and facts from speaker '{speaker}': \"{text}\". "
@@ -190,19 +191,16 @@ class OpenAIProviderAdapter(BaseExtractor):
             "model": self.model,
             "messages": [
                 {"role": "system", "content": "You are a structured fact extraction assistant. Output JSON only."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": prompt},
             ],
-            "response_format": {"type": "json_object"}
+            "response_format": {"type": "json_object"},
         }
 
         req = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            },
-            method="POST"
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            method="POST",
         )
 
         try:

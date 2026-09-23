@@ -1,15 +1,14 @@
 """Conflict resolution, predicate cardinality policies, and versioning engine for Recall."""
 
-from datetime import datetime
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 from recall.config import Clock, ensure_utc
 from recall.db.store import StorageEngine, calculate_fact_hash
 from recall.models.fact import FactCreate, FactRecord, PredicatePolicy, SourceType
 
-
-SOURCE_PRECEDENCE: Dict[SourceType, int] = {
+SOURCE_PRECEDENCE: dict[SourceType, int] = {
     SourceType.USER_EDIT: 4,
     SourceType.DIRECT_STATEMENT: 3,
     SourceType.HEARSAY: 2,
@@ -49,12 +48,12 @@ class ConflictResolver:
         self,
         candidate: FactCreate,
         subject_id: str,
-        object_entity_id: Optional[str] = None,
-        event_time: Optional[datetime] = None,
-        now: Optional[datetime] = None
-    ) -> Tuple[Optional[FactRecord], Optional[str], List[Dict[str, Any]]]:
+        object_entity_id: str | None = None,
+        event_time: datetime | None = None,
+        now: datetime | None = None,
+    ) -> tuple[FactRecord | None, str | None, list[dict[str, Any]]]:
         """Resolves a candidate fact against existing versioned facts.
-        
+
         Returns:
             (created_or_versioned_fact_record, reinforcement_logical_id, unresolved_conflicts)
         """
@@ -67,10 +66,7 @@ class ConflictResolver:
 
         # 1. Fetch currently active version facts (known_at=tx_now) for this subject & predicate
         active_facts = self.store.query_facts(
-            subject_id=subject_id,
-            predicate=candidate.predicate,
-            valid_at=valid_start,
-            known_at=tx_now
+            subject_id=subject_id, predicate=candidate.predicate, valid_at=valid_start, known_at=tx_now
         )
 
         # Exact Duplicate Check (same fact hash)
@@ -81,7 +77,7 @@ class ConflictResolver:
                     logical_fact_id=active.logical_id,
                     source_ref=candidate.source_ref,
                     reinforced_at=valid_start,
-                    tx_time=tx_now
+                    tx_time=tx_now,
                 )
                 return (None, active.logical_id, [])
 
@@ -103,7 +99,7 @@ class ConflictResolver:
                 valid_to=None,
                 tx_from=tx_now,
                 tx_to=None,
-                fact_hash=fact_hash
+                fact_hash=fact_hash,
             )
             self.store.insert_fact_version(new_record)
             self.store.insert_reinforcement(logical_id, candidate.source_ref, valid_start, tx_now)
@@ -111,7 +107,7 @@ class ConflictResolver:
 
         elif policy == PredicatePolicy.SINGLE_VALUED:
             # Single-valued conflict over overlapping valid intervals
-            unresolved: List[Dict[str, Any]] = []
+            unresolved: list[dict[str, Any]] = []
             cand_prec = SOURCE_PRECEDENCE[candidate.source_type]
 
             for active in active_facts:
@@ -119,11 +115,13 @@ class ConflictResolver:
 
                 if cand_prec < act_prec or (cand_prec == act_prec and candidate.confidence < active.confidence):
                     # Lower precedence or lower confidence candidate cannot overwrite higher claim
-                    unresolved.append({
-                        "reason": "lower_precedence_or_confidence",
-                        "candidate": candidate.model_dump(mode="json"),
-                        "conflicting_active": active.model_dump(mode="json")
-                    })
+                    unresolved.append(
+                        {
+                            "reason": "lower_precedence_or_confidence",
+                            "candidate": candidate.model_dump(mode="json"),
+                            "conflicting_active": active.model_dump(mode="json"),
+                        }
+                    )
                     return (None, None, unresolved)
 
             # High precedence/confidence: revise existing active versions cleanly
@@ -145,10 +143,10 @@ class ConflictResolver:
                             source_type=active.source_type,
                             source_ref=active.source_ref,
                             valid_from=active.valid_from,
-                            valid_to=valid_start, # Closed at new fact's start time
+                            valid_to=valid_start,  # Closed at new fact's start time
                             tx_from=tx_now,
                             tx_to=None,
-                            fact_hash=active.fact_hash
+                            fact_hash=active.fact_hash,
                         )
                         self.store.insert_fact_version(revised_old, conn=conn)
 
@@ -169,7 +167,7 @@ class ConflictResolver:
                     valid_to=None,
                     tx_from=tx_now,
                     tx_to=None,
-                    fact_hash=fact_hash
+                    fact_hash=fact_hash,
                 )
                 self.store.insert_fact_version(new_record, conn=conn)
                 self.store.insert_reinforcement(logical_id, candidate.source_ref, valid_start, tx_now, conn=conn)
@@ -196,7 +194,7 @@ class ConflictResolver:
                             valid_to=valid_start,
                             tx_from=tx_now,
                             tx_to=None,
-                            fact_hash=active.fact_hash
+                            fact_hash=active.fact_hash,
                         )
                         self.store.insert_fact_version(retracted, conn=conn)
             return (None, None, [])

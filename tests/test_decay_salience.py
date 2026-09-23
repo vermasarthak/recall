@@ -1,8 +1,10 @@
 """Tests for Ebbinghaus retention decay, reinforcement calculation, and contextual salience scoring."""
 
 import math
+
 import pytest
-from recall.engine.decay import SalienceScorer, calculate_retention, calculate_lexical_similarity
+
+from recall.engine.decay import SalienceScorer, calculate_lexical_similarity, calculate_retention
 
 
 def test_decay_math_exact_spec_values():

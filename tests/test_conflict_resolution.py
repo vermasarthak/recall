@@ -1,12 +1,13 @@
 """Tests for conflict resolution, source precedence, and predicate policies."""
 
-from datetime import datetime, timezone
-import pytest
+from datetime import UTC, datetime
+
 from recall.config import TestClock
 from recall.db.store import StorageEngine
 from recall.engine.conflict import ConflictResolver, get_predicate_policy
 from recall.models.entity import EntityCreate, EntityType
 from recall.models.fact import FactCreate, PredicatePolicy, SourceType
+
 
 def test_predicate_policy_detection():
     assert get_predicate_policy("primary_employer") == PredicatePolicy.SINGLE_VALUED
@@ -14,6 +15,7 @@ def test_predicate_policy_detection():
     assert get_predicate_policy("speaks_language") == PredicatePolicy.MULTI_VALUED
     assert get_predicate_policy("likes") == PredicatePolicy.MULTI_VALUED
     assert get_predicate_policy("retract_employer") == PredicatePolicy.RETRACTION
+
 
 def test_multi_valued_coexistence(tmp_path):
     clock = TestClock()
@@ -27,7 +29,7 @@ def test_multi_valued_coexistence(tmp_path):
         predicate="speaks_language",
         object_value="English",
         source_type=SourceType.DIRECT_STATEMENT,
-        source_ref="msg_1"
+        source_ref="msg_1",
     )
     rec1, _, unres1 = resolver.resolve_and_apply_fact(f1, subject_id=ent.id)
     assert rec1 is not None
@@ -38,7 +40,7 @@ def test_multi_valued_coexistence(tmp_path):
         predicate="speaks_language",
         object_value="Spanish",
         source_type=SourceType.DIRECT_STATEMENT,
-        source_ref="msg_2"
+        source_ref="msg_2",
     )
     rec2, _, unres2 = resolver.resolve_and_apply_fact(f2, subject_id=ent.id)
     assert rec2 is not None
@@ -52,7 +54,7 @@ def test_multi_valued_coexistence(tmp_path):
 
 
 def test_single_valued_conflict_resolution(tmp_path):
-    t1 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
     clock = TestClock(t1)
     store = StorageEngine(str(tmp_path / "test.db"), clock=clock)
     resolver = ConflictResolver(store, clock)
@@ -66,13 +68,13 @@ def test_single_valued_conflict_resolution(tmp_path):
         object_value="Google",
         source_type=SourceType.DIRECT_STATEMENT,
         source_ref="msg_1",
-        valid_from=t1
+        valid_from=t1,
     )
     rec1, _, _ = resolver.resolve_and_apply_fact(f1, subject_id=ent.id, now=t1)
     assert rec1.object_value == "Google"
 
     # 2. At T2 (July 1), Direct statement: John works at Amazon
-    t2 = datetime(2026, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 7, 1, 0, 0, 0, tzinfo=UTC)
     clock.set(t2)
     f2 = FactCreate(
         subject=ent.id,
@@ -80,7 +82,7 @@ def test_single_valued_conflict_resolution(tmp_path):
         object_value="Amazon",
         source_type=SourceType.DIRECT_STATEMENT,
         source_ref="msg_2",
-        valid_from=t2
+        valid_from=t2,
     )
     rec2, _, _ = resolver.resolve_and_apply_fact(f2, subject_id=ent.id, now=t2)
     assert rec2.object_value == "Amazon"
@@ -109,7 +111,7 @@ def test_source_precedence_rejection(tmp_path):
         predicate="primary_employer",
         object_value="Google",
         source_type=SourceType.DIRECT_STATEMENT,
-        source_ref="msg_1"
+        source_ref="msg_1",
     )
     rec_high, _, _ = resolver.resolve_and_apply_fact(f_high, subject_id=ent.id)
     assert rec_high is not None
@@ -120,7 +122,7 @@ def test_source_precedence_rejection(tmp_path):
         predicate="primary_employer",
         object_value="Apple",
         source_type=SourceType.INFERENCE,
-        source_ref="msg_2"
+        source_ref="msg_2",
     )
     rec_low, _, unres = resolver.resolve_and_apply_fact(f_low, subject_id=ent.id)
     assert rec_low is None

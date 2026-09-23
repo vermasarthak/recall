@@ -1,8 +1,8 @@
 import argparse
-import sys
 import os
-import json
+import sys
 from pprint import pprint
+
 
 def main():
     parser = argparse.ArgumentParser(description="Recall Temporal Memory Engine CLI")
@@ -32,6 +32,7 @@ def main():
     if args.command == "server":
         try:
             import uvicorn
+
             print(f"Starting Recall Server on {args.host}:{args.port}...")
             uvicorn.run("recall.server.app:app", host=args.host, port=args.port, reload=True)
         except ImportError:
@@ -64,20 +65,23 @@ def main():
                 print("----------------------\n")
             except Exception as e:
                 print(f"Failed to query: {e}")
-                
+
         elif args.command == "search":
             try:
                 results = client.search(query=args.query)
                 print(f"\n--- Global Search Results for '{args.query}' ---")
                 for r in results:
-                    fact = r['fact']
-                    sub = r['subject']['canonical_name']
-                    print(f"-> {sub} {fact['predicate']} {fact['object_value']} (Salience: {r['salience']['composite_score']:.2f})")
+                    fact = r["fact"]
+                    sub = r["subject"]["canonical_name"]
+                    print(
+                        f"-> {sub} {fact['predicate']} {fact['object_value']} (Salience: {r['salience']['composite_score']:.2f})"
+                    )
                 print("----------------------\n")
             except Exception as e:
                 print(f"Failed to search: {e}")
     else:
         parser.print_help()
+
 
 if __name__ == "__main__":
     main()

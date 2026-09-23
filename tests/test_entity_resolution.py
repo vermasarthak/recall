@@ -1,6 +1,5 @@
 """Tests for entity resolution, alias matching, and Jaro-Winkler fuzzy matching."""
 
-import pytest
 from recall.config import TestClock
 from recall.db.store import StorageEngine
 from recall.engine.extractor import jaro_winkler_similarity
@@ -21,11 +20,7 @@ def test_entity_resolver_hierarchy(tmp_path):
 
     # 1. Create Entity with alias
     e1 = store.create_entity(
-        EntityCreate(
-            type=EntityType.PERSON,
-            canonical_name="Sarthak Verma",
-            aliases=["Sarthak", "SV"]
-        )
+        EntityCreate(type=EntityType.PERSON, canonical_name="Sarthak Verma", aliases=["Sarthak", "SV"])
     )
 
     # Resolve exact canonical name

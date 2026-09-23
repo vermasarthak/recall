@@ -1,9 +1,7 @@
 """Configuration, clock abstractions, and UTC temporal utilities for Recall."""
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-import re
-from typing import Optional
+from datetime import UTC, datetime
 
 
 class NaiveDatetimeError(ValueError):
@@ -12,13 +10,13 @@ class NaiveDatetimeError(ValueError):
 
 def ensure_utc(dt: datetime) -> datetime:
     """Validates that a datetime is timezone-aware and normalizes it to UTC.
-    
+
     Raises:
         NaiveDatetimeError: If dt has no tzinfo.
     """
     if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
         raise NaiveDatetimeError(f"Naive datetime provided: {dt}. Datetimes must be timezone-aware (e.g., UTC).")
-    return dt.astimezone(timezone.utc)
+    return dt.astimezone(UTC)
 
 
 def to_iso_utc(dt: datetime) -> str:
@@ -39,14 +37,13 @@ class Clock(ABC):
     @abstractmethod
     def now(self) -> datetime:
         """Returns the current timezone-aware UTC datetime."""
-        pass
 
 
 class SystemClock(Clock):
     """System clock returning actual UTC current time."""
 
     def now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 class TestClock(Clock):
@@ -54,11 +51,11 @@ class TestClock(Clock):
 
     __test__ = False
 
-    def __init__(self, initial_time: Optional[datetime] = None):
+    def __init__(self, initial_time: datetime | None = None):
         if initial_time is not None:
             self._current_time = ensure_utc(initial_time)
         else:
-            self._current_time = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+            self._current_time = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
 
     def now(self) -> datetime:
         return self._current_time
@@ -68,5 +65,6 @@ class TestClock(Clock):
 
     def advance(self, days: float = 0, hours: float = 0, minutes: float = 0, seconds: float = 0) -> None:
         from datetime import timedelta
+
         delta = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
         self._current_time += delta
