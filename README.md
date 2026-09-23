@@ -44,9 +44,10 @@ pip install recall
 ```
 
 ### 2. Start the Recall Server
-Run the production-ready server via Docker, or locally:
+Run the production server via Docker, or locally with required authentication:
 ```bash
 export OPENAI_API_KEY="sk-..."
+# Master key or tenant-bound keys (e.g. "key_user123:user_123,key_user456:user_456")
 export RECALL_API_KEY="your-secret-key"
 uvicorn recall.server.app:app --port 8000
 ```

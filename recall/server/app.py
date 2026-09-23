@@ -21,17 +21,74 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Recall Server", description="FastAPI Multi-Tenant Server for Recall Memory Engine", lifespan=lifespan)
 
 # Security
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
-    expected_key = os.environ.get("RECALL_API_KEY", "sk-recall-dev-key")
-    if credentials.credentials != expected_key:
+def get_configured_api_keys() -> Dict[str, Optional[str]]:
+    """
+    Parses RECALL_API_KEYS (e.g. 'key1:tenant_1,key2:tenant_2' or single 'RECALL_API_KEY').
+    Returns a dict mapping api_key -> bound_tenant_id (or None if key has access to all tenants).
+    """
+    keys_map: Dict[str, Optional[str]] = {}
+    
+    # 1. Multi-key binding format: RECALL_API_KEYS="sk-key1:tenant1,sk-key2:user_123"
+    multi_keys = os.environ.get("RECALL_API_KEYS", "").strip()
+    if multi_keys:
+        for entry in multi_keys.split(","):
+            entry = entry.strip()
+            if not entry:
+                continue
+            if ":" in entry:
+                k, t = entry.split(":", 1)
+                keys_map[k.strip()] = t.strip()
+            else:
+                keys_map[entry] = None
+                
+    # 2. Single master or dev key
+    single_key = os.environ.get("RECALL_API_KEY", "").strip()
+    if single_key:
+        keys_map[single_key] = None
+        
+    # In test/dev environment, fallback only if RECALL_ALLOW_DEV_KEY is explicitly enabled
+    if not keys_map and os.environ.get("RECALL_ALLOW_DEV_KEY", "").lower() in ("1", "true"):
+        keys_map["sk-recall-dev-key"] = None
+        
+    return keys_map
+
+def verify_api_key(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security),
+    x_tenant_id: Optional[str] = Header(None, alias="x-tenant-id")
+) -> str:
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+        
+    keys_map = get_configured_api_keys()
+    if not keys_map:
+        raise HTTPException(
+            status_code=500,
+            detail="Server authentication is unconfigured. Set RECALL_API_KEY or RECALL_API_KEYS."
+        )
+        
+    token = credentials.credentials
+    if token not in keys_map:
         raise HTTPException(
             status_code=401,
             detail="Invalid authentication token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return credentials.credentials
+        
+    bound_tenant = keys_map[token]
+    if bound_tenant is not None and x_tenant_id is not None:
+        if bound_tenant != x_tenant_id:
+            raise HTTPException(
+                status_code=403,
+                detail=f"API Key is not authorized for tenant '{x_tenant_id}'"
+            )
+            
+    return token
 
 # Multi-tenant state manager
 class TenantManager:
@@ -41,9 +98,15 @@ class TenantManager:
         if not os.path.exists(data_dir):
             os.makedirs(data_dir)
 
+    def validate_tenant_id(self, tenant_id: str) -> bool:
+        """Validates tenant identifier allowing standard alphanumeric, underscores, and hyphens."""
+        if not tenant_id or len(tenant_id) > 64:
+            return False
+        return all(c.isalnum() or c in ('_', '-') for c in tenant_id)
+
     def get_client(self, tenant_id: str) -> Recall:
-        if not tenant_id.isalnum():
-            raise HTTPException(status_code=400, detail="Invalid Tenant ID format. Must be alphanumeric.")
+        if not self.validate_tenant_id(tenant_id):
+            raise HTTPException(status_code=400, detail="Invalid Tenant ID format. Must be alphanumeric with optional '_' or '-'.")
             
         if tenant_id not in self.clients:
             db_path = os.path.join(self.data_dir, f"{tenant_id}.db")
@@ -128,8 +191,17 @@ class PromptContextResponse(BaseModel):
 @app.websocket("/api/v1/stream/{tenant_id}")
 async def websocket_endpoint(websocket: WebSocket, tenant_id: str, token: str):
     # Authenticate websocket
-    expected_key = os.environ.get("RECALL_API_KEY", "sk-recall-dev-key")
-    if token != expected_key:
+    keys_map = get_configured_api_keys()
+    if not keys_map or token not in keys_map:
+        await websocket.close(code=1008)
+        return
+        
+    bound_tenant = keys_map[token]
+    if bound_tenant is not None and bound_tenant != tenant_id:
+        await websocket.close(code=1008)
+        return
+        
+    if not tenant_manager.validate_tenant_id(tenant_id):
         await websocket.close(code=1008)
         return
         

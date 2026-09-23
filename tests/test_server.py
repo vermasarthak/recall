@@ -107,3 +107,38 @@ def test_search_endpoint(client):
     data = response.json()
     assert len(data) > 0
     assert "Starwars" in data[0]["fact"]["object_value"]
+
+def test_tenant_id_with_underscore_and_hyphen(client):
+    headers = {"Authorization": "Bearer sk-test", "x-tenant-id": "user_123-demo"}
+    ingest_payload = {
+        "speaker": "John",
+        "text": "John lives in London",
+        "conversation_id": "c1"
+    }
+    response = client.post("/api/v1/ingest", headers=headers, json=ingest_payload)
+    assert response.status_code == 200
+    assert response.json()["inserted"] > 0
+
+def test_tenant_bound_api_key_enforcement(client):
+    # Configure key bindings: sk-bound-a is only allowed for tenant_a
+    os.environ["RECALL_API_KEYS"] = "sk-bound-a:tenant_a,sk-bound-b:tenant_b"
+    try:
+        # 1. Allowed access
+        res_ok = client.post(
+            "/api/v1/query",
+            headers={"Authorization": "Bearer sk-bound-a", "x-tenant-id": "tenant_a"},
+            json={"about_entity": "Alice"}
+        )
+        assert res_ok.status_code == 200
+
+        # 2. Cross-tenant attempt with bound key -> 403 Forbidden
+        res_forbidden = client.post(
+            "/api/v1/query",
+            headers={"Authorization": "Bearer sk-bound-a", "x-tenant-id": "tenant_b"},
+            json={"about_entity": "Alice"}
+        )
+        assert res_forbidden.status_code == 403
+        assert "not authorized for tenant" in res_forbidden.json()["detail"]
+    finally:
+        del os.environ["RECALL_API_KEYS"]
+
