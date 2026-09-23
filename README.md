@@ -19,20 +19,20 @@ Standard RAG relies on vector databases that append new facts endlessly. If a us
 Furthermore, memories decay. A minor detail mentioned 3 years ago shouldn't have the same context weight as a major life event mentioned yesterday.
 
 ## The Solution: Recall
-**Recall** is a thread-safe, bitemporal entity-graph memory engine designed specifically for long-horizon AI companions and agents. 
+**Recall** is a thread-safe, bitemporal entity and fact store designed specifically for long-horizon AI companions and agents. 
 
 It solves stateful memory through:
-1. **Bitemporal Fact Tracking**: Memories are tracked by when they were true (`valid_time`) and when the agent learned them (`knowledge_time`). When facts change, the old fact is gracefully closed, not deleted.
+1. **Bitemporal Fact Tracking**: Memories are tracked by when they were true (`valid_time`) and when the agent learned them (`knowledge_time`) using half-open `[from, to)` intervals. When facts change, the old fact is gracefully closed, not deleted.
 2. **Ebbinghaus Salience Decay**: Memories automatically decay in relevance over time unless they are reinforced.
-3. **Global Semantic Vector Search**: Under the hood, facts are cached as vector embeddings, allowing $O(N)$ semantic RAG searches globally across the SQLite graph.
-4. **Deterministic Conflict Resolution**: New conflicting facts overwrite old ones deterministically, ensuring the LLM always gets a clean, conflict-free XML context block.
+3. **Tenant-Scoped Semantic Search**: Facts are cached as vector embeddings, enabling semantic similarity search within tenant boundaries.
+4. **Deterministic Conflict Resolution**: New conflicting facts overwrite old ones deterministically, ensuring the LLM always gets a clean, conflict-free context block.
 
 ## Features
-- 🚀 **Multi-Tenant FastAPI Server**: Built-in HTTP server with Bearer auth and Multi-tenant SQLite isolation (O(1) routing).
-- 🧠 **Vector RAG Fallback**: Perform semantic queries against memory nodes when you don't know the exact Entity ID.
-- 🧵 **Extreme Concurrency**: Hand-optimized Python SQLite drivers using thread-local pooling and WAL mode `RLock` mutexes for massive scale.
-- 🗑️ **Garbage Collection & GDPR**: Delete isolated graphs or vacuum retracted historical data to save disk space.
-- ⚡ **Async Python SDK**: Drop-in Python client (`RecallRemoteClient`) for seamless integration into your Agent loops.
+- 🚀 **Multi-Tenant FastAPI Server**: Built-in HTTP server with Bearer auth and per-tenant SQLite isolation.
+- 🧠 **Vector Fallback**: Perform semantic queries against memory entries when exact entity identifiers are unknown.
+- 🧵 **Thread-Safe SQLite WAL**: SQLite WAL mode with serialized single-writer discipline for embedded and single-node agent servers.
+- 🗑️ **Lifecycle & Retention**: Drop isolated tenant databases or vacuum retracted historical data for storage efficiency.
+- ⚡ **Async Python SDK**: Python client (`RecallRemoteClient`) for integration into agent loops.
 
 ---
 
